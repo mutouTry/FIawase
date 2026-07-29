@@ -5,9 +5,8 @@ reuses the DUT's own scan chain, and flips bits in real flops while the processo
 drives it over JTAG. One simulation runs thousands of trials.
 
 The wrapper adds no fault-injection logic to your design. The synthesis flow splices the clock
-gating it needs into the netlist. See [what your DUT has to provide](#what-your-dut-has-to-provide).
-The example DUT is [tinyriscv](https://gitee.com/liangkangnan/tinyriscv). The wrapper itself is
-DUT-independent.
+gating it needs into the netlist. The example DUT is
+[tinyriscv](https://gitee.com/liangkangnan/tinyriscv); the wrapper itself is DUT-independent.
 
 > **Status: usable, not polished.** Verified in gate-level simulation on one SoC and one PDK.
 > Expect to iterate the first time you port it.
@@ -44,143 +43,102 @@ can share one rotation to model a multi-bit upset.
 
 ---
 
-## Repository layout
-
-| path | what |
-|---|---|
-| `rtl/fi/` | the wrapper: FI Transporter, FI Executor, the three controllers, the FI Table |
-| `syn/` | the synthesis flow: inserts the freeze gate, keeps frozen blocks off the chain, asserts the invariants, exports the `FI_Index → flop` map |
-| `host/` | OpenOCD Tcl: DMI primitives, FI-entry encoder, ready-made campaigns |
-| `tb/` | testbench for the example SoC, with UART observation taps |
-| `tests/` | self-checking regression for the freeze gate, needs only `iverilog` |
-| `sim/` | Makefile for the gate-level campaign (point `NETLIST=` at your own netlist) |
-| `firmware/` | the workload the campaign runs, with source |
-| `rtl/soc/` | the example DUT (tinyriscv SoC), vendored |
-| `docs/` | runbook and architecture description |
-
-`rtl/soc/` is vendored from tinyriscv and keeps its original Chinese comments. The wrapper and
-its flow are in English.
-
----
-
-## What you need
-
-| tool | for what | required? |
-|---|---|---|
-| `iverilog` | the gate regression in `tests/` | no other tool needed |
-| Synopsys Design Compiler | scan insertion, the flow in `syn/` | yes, for the gate-level path |
-| a standard-cell library | synthesis | yes, bring your own, none is shipped |
-| a Verilog simulator (VCS…) | the gate-level campaign | yes |
-| OpenOCD | driving the wrapper over JTAG | yes |
-| a RISC-V toolchain | firmware for the example SoC | only for the example |
-
-No foundry data is shipped: no `.lib`/`.db`/`.lef`, no memory macros, no gate-level netlist, no
-SDF. Run synthesis with your own PDK. See [NOTICE](NOTICE).
-
-## The two config files
-
-Both are gitignored. Both have a checked-in, commented `.example` next to them. Both contain
-paths only.
-
-| copy this | to this | and fill in |
-|---|---|---|
-| `syn/tool_config.tcl.example` | `syn/tool_config.tcl` | your `.db` libraries, the RTL directories, the SDC |
-| `sim/config.mk.example` | `sim/config.mk` | your netlist, your standard-cell and SRAM simulation models, defines |
-
-- `sim/config.mk` also needs the behavioural `.v` models of your standard cells. Without them
-  every module in the netlist is undefined.
-- If your DUT instantiates memory macros, supply their `.db` for synthesis and their `.v` model
-  for simulation.
-- The RTL defines must be the same on both sides. Synthesising with one set and simulating with
-  another gives a netlist the testbench cannot drive.
-- Both places take a full command, so tools behind a container or a site wrapper work.
-- `make -C sim echo-config` prints the configuration as resolved. Check it first when a build fails.
-
-```make
-VCS := singularity exec /path/to/vcs.sif vcs                        # sim/config.mk
-```
-```sh
-make -C syn dc DC_SHELL='singularity exec /path/to/syn.sif dc_shell'  # a make variable, not tool_config.tcl
-```
-
----
-
-## Quick start
-
-**1. Prove the freeze gate. 30 seconds, `iverilog` only.**
+## Try it — 30 seconds, `iverilog` only
 
 ```sh
 cd tests && ./run.sh
 ```
 
-Over nine chain lengths it checks that the freeze window masks exactly `L` clock edges and that
-the chain comes back bit-perfect.
+Over nine chain lengths this checks that the freeze window masks exactly `L` clock edges and that
+the chain comes back bit-perfect. It is the one thing here that needs no PDK and no licence.
 
-**2. Synthesise with scan and the freeze gate.** `syn/fi_scan_cfg.tcl` is the only DUT-specific file:
+---
 
-```tcl
-set FI_CLK_PORT   clk_50m_i        ;# free-running functional clock
-set FI_RST_PORT   rst_ext_ni       ;# async reset, active low
-set FI_GATE_PORT  scan_gate        ;# freeze request from the wrapper
+## Running the example SoC
 
-set FI_GATE_PINS { u_rom/clk_i u_ram/clk_i u_jtag/clk_i uart0/clk_i ... }
-set FI_EXEMPT        { u_rst uart0 }
-set FI_EXEMPT_CLOCKS { jtag_TCK }
-```
+This part needs commercial tools and your own PDK. **No foundry data is shipped**: no
+`.lib`/`.db`/`.lef`, no memory macros, no netlist, no SDF.
 
-Then source `syn/scanchain.tcl` into your own DC session after the first `compile_ultra`, or use
-the bundled driver:
+| you supply | for |
+|---|---|
+| Synopsys Design Compiler | scan insertion |
+| a standard-cell library, `.db` | synthesis |
+| the same library's Verilog simulation model | gate-level simulation |
+| VCS | gate-level simulation. The JTAG DPI bridge does not build under iverilog. |
+| OpenOCD | driving the campaign |
+
+The workload ships prebuilt, so no RISC-V toolchain is needed unless you change it.
+
+**1. Fill in two config files.** Both are gitignored and contain paths only. Each has a
+commented `.example` next to it.
 
 ```sh
-cd syn
-cp tool_config.tcl.example tool_config.tcl   # your libraries and paths
-make dc
+cp syn/tool_config.tcl.example syn/tool_config.tcl   # .db libraries, RTL dirs, SDC
+cp sim/config.mk.example       sim/config.mk         # netlist, cell + memory sim models
 ```
 
-Either way it will:
+- If your DUT instantiates memory macros, supply their `.db` for synthesis and their `.v` model
+  for simulation.
+- The RTL defines must be the same on both sides. Synthesising with one set and simulating with
+  another gives a netlist the testbench cannot drive.
+- Both files take a full command, so tools behind a container or a site wrapper work:
 
-1. splice one `fi_clk_gate` instance into the netlist
-2. re-route every pin in `FI_GATE_PINS` onto the gated clock
-3. keep those blocks off the scan chain (`set_scan_element false`)
-4. run `insert_dft`
-5. assert the five invariants, and fail if any is violated
-6. export `fi_scanmap.txt` (`FI_Index → flop`) plus config for the RTL and the host
+  ```make
+  VCS := singularity exec /path/to/vcs.sif vcs         # in sim/config.mk
+  ```
+  ```sh
+  make -C syn dc DC_SHELL='singularity exec /path/to/syn.sif dc_shell'
+  ```
+
+**2. Synthesise.**
+
+```sh
+make -C syn dc
+```
+
+This splices in the freeze gate, re-routes the frozen clock pins, runs `insert_dft`, asserts the
+five invariants, and writes the netlist, the `FI_Index → flop` map (`fi_scanmap.txt`), and a
+config file for the RTL and one for the host into `syn/results/`. Copy those two over, then:
+
+```sh
+make -C syn sync-check     # confirms the three places agree on the chain length
+```
+
+> The netlist, `rtl/fi/fi_scan_cfg.vh` and `host/tapename.tcl` must agree on the chain length.
+> A mismatch means the chain is never restored and the DUT dies on the first injection.
+> [docs/RUNBOOK.md](docs/RUNBOOK.md) §2.4 lists exactly which file goes where.
 
 **3. Run a campaign.**
 
 ```sh
-cd sim
-cp config.mk.example config.mk               # netlist + cell models
-make                                         # builds and starts the simulator
+make -C sim                      # builds and starts the simulator
 ```
-
 ```sh
-openocd -f host/fi_openocd.cfg   # in a second shell
-telnet localhost 4444            # in a third
+openocd -f host/fi_openocd.cfg   # second shell
+telnet localhost 4444            # third shell
 > poll off
 > fi_campaign { {30000 {2354}} {90000 {2354}} {90000 {2354 2355 2356}} }
 ```
 
 One trial is `{<cycle> {<FI_Index> ...}}`: when to inject, and which flops to flip. The three
 above are the same flop early, the same flop later, and a 3-bit upset at the same instant as the
-second. Those index numbers are for the example netlist; yours will differ. All of a trial's bits are flipped in one scan pass, so an n-bit upset costs `L` cycles,
-not `n*L`.
+second. All of a trial's bits are flipped in one scan pass, so an n-bit upset costs `L` cycles,
+not `n*L`. Those index numbers are for the example netlist; yours will differ.
 
 Cycles are absolute, counted from reset release. The testbench prints the same ruler in
-`fi_exec_window.txt`. Use it to find the legal range for your workload. `grep <flop-name>
-fi_scanmap.txt` finds the `FI_Index` for any flop.
+`fi_exec_window.txt`. Use it to find the legal range for your workload.
 
 > **A result belongs to one netlist and one seed.** Flops with no reset start at a random value,
 > so `sim/Makefile` pins the seed (`SEED ?= 1`). Re-baseline after re-synthesising. `make SEED=2`
 > re-runs the same faults from a different initial state.
 
-> **The netlist, `rtl/fi/fi_scan_cfg.vh` and `host/tapename.tcl` must agree on the chain
-> length.** Synthesis emits the first two. `make -C syn sync-check` tells you whether all three
-> match. A mismatch means the chain is never restored and the DUT dies on the first injection.
+`make -C sim echo-config` prints the configuration as resolved. Check it first when a build fails.
 
 ---
 
-## What your DUT has to provide
+## Porting to your own DUT
+
+### What your DUT has to provide
 
 You add the freeze input. The rest are properties your design must already have. The flow cannot
 check most of them. A wrong one shows up later as a broken campaign, not as a synthesis error.
@@ -197,8 +155,8 @@ check most of them. A wrong one shows up later as a broken campaign, not as a sy
 | 8 | a JTAG TAP with a 5-bit IR, TRSTn wired outside the wrapper | cutover never happens and every later write is lost |
 | 9 | an observation channel that survives a freeze | every trial returns garbage, after everything else passes |
 
-Item 1 is the only port the flow will create for you if it is missing. It prints a warning. You
-then drive that port from the level above.
+Item 1 is the only port the flow creates for you if it is missing. It prints a warning, and you
+drive that port from the level above.
 
 Item 9 costs real design work. During an injection the frozen set loses exactly `L` clock edges
 and the shifted set is scrambled for `L` cycles, so any peripheral mid-transmission emits garbage.
@@ -207,43 +165,24 @@ finishes while the core is frozen. The example SoC uses `scan_uart_top`; the reu
 half is `rtl/soc/perips/uart/cdc_rv_1deep.v`. Anything in the output path that is not CDC'd must
 be frozen instead. `u_pinmux` is in `FI_GATE_PINS` because shifting it scrambles the pad mux.
 
----
+### The one file you edit
 
-## Taking it to an FPGA
+`syn/fi_scan_cfg.tcl`. Everything else in `syn/` is DUT-independent.
 
-Import two things into Vivado as RTL:
+```tcl
+set FI_CLK_PORT   clk_50m_i        ;# free-running functional clock
+set FI_RST_PORT   rst_ext_ni       ;# async reset, active low
+set FI_GATE_PORT  scan_gate        ;# freeze request from the wrapper
 
-1. the scan-inserted netlist from `syn/results/`
-2. your standard cell library, rewritten as plain synthesisable Verilog
-
-The netlist is only cell instances, so Vivado maps it to LUTs and flops like any other
-RTL. The scan chain comes with it and `fi_scanmap.txt` stays valid.
-
-The rewrite is one small module per cell. Vendor simulation models use `specify` blocks,
-UDPs and timing checks that synthesis rejects; write the function instead:
-
-```verilog
-module AOI22D1 (A1, A2, B1, B2, ZN);
-    output ZN;  input A1, A2, B1, B2;
-    assign ZN = ~((A1 & A2) | (B1 & B2));
-endmodule
-
-module SDFQD1 (SI, D, SE, CP, Q);       // a scan flop is a 2:1 mux and a flop
-    output reg Q;  input SI, D, SE, CP;
-    always @(posedge CP) Q <= SE ? SI : D;
-endmodule
+set FI_GATE_PINS { u_rom/clk_i u_ram/clk_i u_jtag/clk_i uart0/clk_i ... }
+set FI_EXEMPT        { u_rst uart0 }
+set FI_EXEMPT_CLOCKS { jtag_TCK }
 ```
 
-Two more substitutions:
+If you already have a Design Compiler flow, you do not need `make dc`. Source
+`syn/scanchain.tcl` into your own session after the first `compile_ultra`.
 
-- each memory macro instance needs a block-RAM wrapper with the same ports
-- use `BUFGCE` for the freeze gate. Latch-plus-AND is not an FPGA clock primitive.
-  The frozen blocks must still lose exactly `L` edges; check any substitute with
-  `tests/run.sh`.
-
----
-
-## The five synthesis invariants
+### The five synthesis invariants
 
 Every flop must be either shifted (on the chain) or frozen (clock-gated). Anything else breaks
 silently at run time: the DUT dies the moment FI is armed, with nothing wrong at synthesis.
@@ -264,13 +203,58 @@ black boxes. See [syn/README.md](syn/README.md).
 
 ---
 
+## Taking it to an FPGA
+
+Import two things into Vivado as RTL:
+
+1. the scan-inserted netlist from `syn/results/`
+2. your standard cell library, rewritten as plain synthesisable Verilog
+
+The netlist is only cell instances, so Vivado maps it to LUTs and flops like any other RTL. The
+scan chain comes with it and `fi_scanmap.txt` stays valid.
+
+The rewrite is one small module per cell. Vendor simulation models use `specify` blocks, UDPs and
+timing checks that synthesis rejects; write the function instead:
+
+```verilog
+module AOI22D1 (A1, A2, B1, B2, ZN);
+    output ZN;  input A1, A2, B1, B2;
+    assign ZN = ~((A1 & A2) | (B1 & B2));
+endmodule
+
+module SDFQD1 (SI, D, SE, CP, Q);       // a scan flop is a 2:1 mux and a flop
+    output reg Q;  input SI, D, SE, CP;
+    always @(posedge CP) Q <= SE ? SI : D;
+endmodule
+```
+
+Two more substitutions:
+
+- each memory macro instance needs a block-RAM wrapper with the same ports
+- use `BUFGCE` for the freeze gate. Latch-plus-AND is not an FPGA clock primitive. The frozen
+  blocks must still lose exactly `L` edges; check any substitute with `tests/run.sh`.
+
+---
+
+## Repository layout
+
+| path | what |
+|---|---|
+| `rtl/fi/` | the wrapper: FI Transporter, FI Executor, the three controllers, the FI Table |
+| `syn/` | the synthesis flow: freeze gate, scan exclusion, the invariants, the `FI_Index → flop` map |
+| `host/` | OpenOCD Tcl: DMI primitives, FI-entry encoder, ready-made campaigns |
+| `tb/` | testbench for the example SoC, with UART observation taps |
+| `tests/` | self-checking regression for the freeze gate, needs only `iverilog` |
+| `sim/` | Makefile for the gate-level campaign |
+| `firmware/` | the workload the campaign runs, prebuilt, with source |
+| `rtl/soc/` | the example DUT, vendored from tinyriscv. Keeps its original Chinese comments; the wrapper and its flow are in English. |
+| `docs/` | runbook and architecture description |
+
 ## Documentation
 
 - **[docs/RUNBOOK.md](docs/RUNBOOK.md)** — clone to running campaign, step by step. **Start here.**
 - **[docs/DESIGN.md](docs/DESIGN.md)** — architecture, DMI register map, FI table encoding
 - **[syn/README.md](syn/README.md)** — the synthesis flow, and what the invariants miss
-
----
 
 ## Licence
 
