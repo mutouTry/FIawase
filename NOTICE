@@ -51,6 +51,9 @@ rtl/soc/core/tracer.sv
 rtl/soc/perips/uart/cdc_rv_1deep.v
     Written for this project.
 
+docs/figures/
+    Figures from the FIawase paper, by the same authors.
+
 firmware/application_intmix.*
     Written for this project. The prebuilt image links against the
     Nuclei SDK BSP, which is Apache-2.0 licensed. The SDK itself is not

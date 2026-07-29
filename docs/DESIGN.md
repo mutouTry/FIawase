@@ -19,22 +19,7 @@ configuration over JTAG/DMI, then the executor runs on its own.
 
 ### 1.1 System level
 
-```mermaid
-flowchart LR
-  HOST["Host JTAG<br/>(OpenOCD / jtagdpi)"] <-->|AON JTAG| TR
-  subgraph WRAP["fi_wrapper_top"]
-    TR["FI Transporter<br/>FI Mode off/on"]
-    EX["FI Executor"]
-  end
-  TR -->|"Transparent (off) / Parked (on)"| DUTJTAG["JTAG | DUT"]
-  TR -->|"cfg_* / FI Table preload"| EX
-  EX -->|"scan_in/out, scan_en, testmode"| SC["Scan chain (netlist)"]
-  EX -->|"clk_gate → gated clock"| CLK["Clk / Reset"]
-  EX -->|"fi_rst"| CLK
-  DUT["DUT flops"] --- SC
-  DUT --- CLK
-  DUT -->|UART| RX["Host receiver<br/>(uart_rx_print)"]
-```
+![System level: the FI Transporter owns the host-facing TAP, the FI Executor owns the DUT](figures/FIawase_figure1.png)
 
 - FI Mode off: Transparent. Host JTAG passes through to the DUT's JTAG.
 - FI Mode on: Parked. The DUT's JTAG is parked and the Executor owns the DUT.
@@ -42,23 +27,7 @@ flowchart LR
 
 ### 1.2 Inside the Executor
 
-```mermaid
-flowchart TB
-  subgraph EXE["fi_executor = fi_executor_core + fi_table"]
-    TC["FI Time Controller<br/>fi_time_ctrl<br/>counter→FI_Cycle, timeout=TO_Thr"]
-    SCC["FI Scan Controller<br/>fi_scan_ctrl<br/>run_cnt 0..L-1, flip at hit_step"]
-    TBC["FI Table Controller<br/>fi_table_ctrl<br/>decode entry, advance pointer"]
-    RES["FI Resolver<br/>(reset-except-config;<br/>impact classify = placeholder)"]
-    TAB["FI Table<br/>fi_table (256 x 32b flops)"]
-  end
-  TBC -->|"FI_Index"| SCC
-  TC -->|"scan_start (at FI_Cycle)"| SCC
-  TC -->|"timeout (at TO_Thr) → resolver_rst"| RES
-  RES -->|"resolver_rst resets DUT and internal state"| TBC
-  TBC <-->|"tbl_rd_addr / tbl_rdata"| TAB
-  SCC -->|"Scan_En / Scan_In / Clk_Gate / testmode"| DUT["DUT scan chain"]
-  DUT -->|scan_out| SCC
-```
+![Inside the Executor: Time, Scan and Table controllers, the Resolver and the FI Table](figures/FIawase_figure2.png)
 
 | block | code | key signals |
 |---|---|---|
@@ -242,15 +211,10 @@ plus `fi_table`. Glue: [fi_executor_core.v](../rtl/fi/fi_executor_core.v).
 
 ### 5.5 FI Table encoding (EOP + Cycle_Offset)
 
-```
-W_IDX = $clog2(N_FF); N_FF comes from fi_scan_cfg.vh
-(= 8192 ⇒ W_IDX = 13, so Cycle_Offset is 18 bits)
+![FI_Entry: EOP in bit 31, Cycle_Offset in bits 30 down to W_idx, FI_Index in the low W_idx bits](figures/FIawase_figure3.png)
 
-bit  31 30                W_IDX W_IDX-1      0
-    +---+--------------------+--------------+
-    |EOP|    Cycle_Offset    |   FI_Index   |
-    +---+--------------------+--------------+
-```
+`W_IDX = $clog2(N_FF)`, and `N_FF` comes from `fi_scan_cfg.vh`. With `N_FF = 8192`,
+`W_IDX = 13` and `Cycle_Offset` is 18 bits wide.
 
 | field | valid when | meaning |
 |---|---|---|
