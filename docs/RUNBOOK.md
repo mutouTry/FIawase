@@ -81,9 +81,22 @@ bundled tinyriscv example. For your own DUT, set it in this order:
 
 Use instance paths exactly as `report_scan_path` prints them.
 
-Your DUT's RTL must first satisfy the contract in
-[README.md](../README.md#what-your-dut-has-to-provide), including an observation
-channel that survives a freeze. The flow does not check this.
+#### Preconditions to check against your design
+
+Three of these come from [README.md](../README.md#what-your-dut-has-to-provide):
+the freeze input, one free-running functional clock, and an observation channel
+that survives a freeze. The rest are properties the flow assumes and does not
+verify.
+
+| what | why | if your design differs |
+|---|---|---|
+| the reset on `FI_RST_PORT` is **active low** | hardcoded in `fi_clk_gate.v`, `fi_scan_lib.tcl`, `scanchain.tcl` and `fi_wrapper_top.v` | edit those four places. Nothing warns you. |
+| a **testmode input already exists** | declared with `-view existing_dft`; only the three scan ports are created for you | add the port to your top level |
+| **hierarchy survives both compiles** | `-no_autoungroup`. Flattening destroys the `FI_Index → flop` map and the instance paths the checks match on | keep `-no_autoungroup` |
+| exactly **one clock domain needs freezing** | one gate is built on one net | a second domain cannot be expressed |
+| every stateful **black-box macro** sits under a frozen instance | `all_registers` does not return black boxes, so A3 cannot see them | freeze the parent, or prove the macro is idle |
+| the JTAG TAP has a **5-bit IR** | both TAPs share one IR shift under a single OpenOCD `-irlen` | edit `FI_JTAG_IR_BITS` in `rtl/fi/fi_transporter.v` |
+| **TRSTn**, if your TAP has one | the wrapper does not pass it through | wire it outside the wrapper |
 
 ### 2.2 Run
 

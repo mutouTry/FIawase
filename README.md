@@ -33,9 +33,11 @@ gating it needs into the netlist. The example DUT is
 One injection is one rotation of the chain. Shift `L` times and invert the bit as it passes the
 scan-out pin. After `L` steps every flop is back where it was, except the targeted one.
 
-Blocks that must not be disturbed (memories, the debug TAP, the pad mux) are clock-gated for the
-same `L` cycles instead of being shifted. The edge count must be exact. An error of one cycle
-makes the chain unrestorable.
+While the chain rotates, every flop on it holds someone else's data. So anything that must not be
+disturbed is taken off the chain and clock-gated for exactly those `L` cycles instead.
+
+> **Every flop is either shifted or frozen.** That one rule is what you configure when you port,
+> and what the synthesis flow checks for you.
 
 A campaign is a table, not a single shot. The host writes a list of entries and the wrapper walks
 it on its own: inject, run, reset, next entry. Each entry carries a cycle offset. Several entries
@@ -43,21 +45,10 @@ can share one rotation to model a multi-bit upset.
 
 ---
 
-## Try it — 30 seconds, `iverilog` only
-
-```sh
-cd tests && ./run.sh
-```
-
-Over nine chain lengths this checks that the freeze window masks exactly `L` clock edges and that
-the chain comes back bit-perfect. It is the one thing here that needs no PDK and no licence.
-
----
-
 ## Running the example SoC
 
-This part needs commercial tools and your own PDK. **No foundry data is shipped**: no
-`.lib`/`.db`/`.lef`, no memory macros, no netlist, no SDF.
+This needs commercial tools and your own PDK. **No foundry data is shipped**: no `.lib`/`.db`/
+`.lef`, no memory macros, no netlist, no SDF.
 
 | you supply | for |
 |---|---|
@@ -69,8 +60,8 @@ This part needs commercial tools and your own PDK. **No foundry data is shipped*
 
 The workload ships prebuilt, so no RISC-V toolchain is needed unless you change it.
 
-**1. Fill in two config files.** Both are gitignored and contain paths only. Each has a
-commented `.example` next to it.
+**1. Fill in two config files.** Both are gitignored and contain paths only. Each has a commented
+`.example` next to it.
 
 ```sh
 cp syn/tool_config.tcl.example syn/tool_config.tcl   # .db libraries, RTL dirs, SDC
@@ -94,19 +85,17 @@ cp sim/config.mk.example       sim/config.mk         # netlist, cell + memory si
 
 ```sh
 make -C syn dc
+make -C syn sync-check
 ```
 
-This splices in the freeze gate, re-routes the frozen clock pins, runs `insert_dft`, asserts the
-five invariants, and writes the netlist, the `FI_Index → flop` map (`fi_scanmap.txt`), and a
-config file for the RTL and one for the host into `syn/results/`. Copy those two over, then:
+`make dc` splices in the freeze gate, re-routes the frozen clock pins, runs `insert_dft`, checks
+its own work, and writes the netlist plus the `FI_Index → flop` map to `syn/results/`. It also
+writes a config file for the RTL and one for the host; copy those over, then `sync-check`
+confirms all three agree on the chain length.
 
-```sh
-make -C syn sync-check     # confirms the three places agree on the chain length
-```
-
-> The netlist, `rtl/fi/fi_scan_cfg.vh` and `host/tapename.tcl` must agree on the chain length.
-> A mismatch means the chain is never restored and the DUT dies on the first injection.
-> [docs/RUNBOOK.md](docs/RUNBOOK.md) §2.4 lists exactly which file goes where.
+> A chain length that does not match the netlist means the chain is never restored and the DUT
+> dies on the first injection, with no error message. [docs/RUNBOOK.md](docs/RUNBOOK.md) §2.4
+> lists which file goes where.
 
 **3. Run a campaign.**
 
@@ -126,11 +115,10 @@ second. All of a trial's bits are flipped in one scan pass, so an n-bit upset co
 not `n*L`. Those index numbers are for the example netlist; yours will differ.
 
 Cycles are absolute, counted from reset release. The testbench prints the same ruler in
-`fi_exec_window.txt`. Use it to find the legal range for your workload.
+`fi_exec_window.txt`. Pick targets with `grep <flop-name> syn/results/fi_scanmap.txt`.
 
 > **A result belongs to one netlist and one seed.** Flops with no reset start at a random value,
-> so `sim/Makefile` pins the seed (`SEED ?= 1`). Re-baseline after re-synthesising. `make SEED=2`
-> re-runs the same faults from a different initial state.
+> so `sim/Makefile` pins the seed (`SEED ?= 1`). Re-baseline after re-synthesising.
 
 `make -C sim echo-config` prints the configuration as resolved. Check it first when a build fails.
 
@@ -138,70 +126,72 @@ Cycles are absolute, counted from reset release. The testbench prints the same r
 
 ## Porting to your own DUT
 
-### What your DUT has to provide
+### Deciding what is shifted and what is frozen
 
-You add the freeze input. The rest are properties your design must already have. The flow cannot
-check most of them. A wrong one shows up later as a broken campaign, not as a synthesis error.
-
-| | requirement | if it is wrong |
-|---|---|---|
-| 1 | a top-level freeze input, named in `FI_GATE_PORT`, launched by a clock 1:1 synchronous with the functional clock | the `L`-edge count breaks, and nothing checks it |
-| 2 | one free-running functional clock port that already drives every pin in `FI_GATE_PINS`, undivided | the flow silently moves that block to another clock domain, permanently |
-| 3 | exactly one clock domain that needs freezing | two cannot be expressed; listing both shorts them together |
-| 4 | an active-low async reset | it is hardcoded in four places; three breakages at once |
-| 5 | a testmode input that already exists | Tcl error mid-run, and `dc_shell` does not stop on it |
-| 6 | hierarchy that survives both compiles (`-no_autoungroup`) | the `FI_Index → flop` map becomes meaningless |
-| 7 | every stateful black-box macro under a frozen instance | `all_registers` cannot see them, so A3 cannot either |
-| 8 | a JTAG TAP with a 5-bit IR, TRSTn wired outside the wrapper | cutover never happens and every later write is lost |
-| 9 | an observation channel that survives a freeze | every trial returns garbage, after everything else passes |
-
-Item 1 is the only port the flow creates for you if it is missing. It prints a warning, and you
-drive that port from the level above.
-
-Item 9 costs real design work. During an injection the frozen set loses exactly `L` clock edges
-and the shifted set is scrambled for `L` cycles, so any peripheral mid-transmission emits garbage.
-The channel needs a FIFO plus a CDC into an ungated transmit domain, so the in-flight byte
-finishes while the core is frozen. The example SoC uses `scan_uart_top`; the reusable, bus-free
-half is `rtl/soc/perips/uart/cdc_rv_1deep.v`. Anything in the output path that is not CDC'd must
-be frozen instead. `u_pinmux` is in `FI_GATE_PINS` because shifting it scrambles the pad mux.
-
-### The one file you edit
-
-`syn/fi_scan_cfg.tcl`. Everything else in `syn/` is DUT-independent.
+That decision is the port. It lives in `syn/fi_scan_cfg.tcl`, the only file you edit:
 
 ```tcl
 set FI_CLK_PORT   clk_50m_i        ;# free-running functional clock
 set FI_RST_PORT   rst_ext_ni       ;# async reset, active low
 set FI_GATE_PORT  scan_gate        ;# freeze request from the wrapper
 
-set FI_GATE_PINS { u_rom/clk_i u_ram/clk_i u_jtag/clk_i uart0/clk_i ... }
-set FI_EXEMPT        { u_rst uart0 }
-set FI_EXEMPT_CLOCKS { jtag_TCK }
+set FI_GATE_PINS     { u_rom/clk_i u_ram/clk_i u_jtag/clk_i ... }   ;# frozen
+set FI_EXEMPT        { u_rst uart0 }                                ;# neither
+set FI_EXEMPT_CLOCKS { jtag_TCK }                                   ;# neither, by clock domain
 ```
 
-If you already have a Design Compiler flow, you do not need `make dc`. Source
-`syn/scanchain.tcl` into your own session after the first `compile_ultra`.
+Clock **pins**, not instances: a block with two clocks may need only one of them frozen. Anything
+not listed is shifted.
 
-### The five synthesis invariants
+`FI_EXEMPT` means "neither shifted nor frozen, and I take responsibility". It is legitimate for a
+block that must keep running through the window, and for a clock domain that is idle during it.
 
-Every flop must be either shifted (on the chain) or frozen (clock-gated). Anything else breaks
-silently at run time: the DUT dies the moment FI is armed, with nothing wrong at synthesis.
+The flow proves the rule holds. **On a new DUT it will fail on the first run**, listing every
+register you have not classified yet, grouped by instance. Work the list, re-run, repeat. The
+checks and their blind spots are in [syn/README.md](syn/README.md).
 
-| | check | catches |
+If you already have a Design Compiler flow you do not need `make dc`. Source `syn/scanchain.tcl`
+into your own session after the first `compile_ultra`.
+
+### What your DUT has to provide
+
+| | requirement | if it is missing |
 |---|---|---|
-| A1 | every pin in `FI_GATE_PINS` is really on the gated clock | the declaration and the netlist disagreeing |
-| A2 | no flop is both frozen and on the chain | the chain becoming unrestorable |
-| A3 | every register is shifted, frozen, or explicitly exempt | a block nobody accounted for |
-| A4 | `L` still fits the table encoding | injecting at the wrong index |
-| A5 | DFT did not rewire the gated clock | `-fix_clock` quietly undoing the freeze |
+| 1 | a top-level freeze input, named in `FI_GATE_PORT` | the flow creates the port and warns; you then drive it from the level above |
+| 2 | one free-running functional clock that already drives every pin in `FI_GATE_PINS` | the flow moves that block to another clock domain, permanently, and nothing catches it |
+| 3 | an observation channel that survives the freeze | every trial returns garbage, after everything else has passed |
 
-A3 failing on a new DUT is normal. It lists, grouped by instance, what you have not classified
-yet. Idle foreign clock domains (a debug TAP, an RTC) go in `FI_EXEMPT_CLOCKS`.
+Item 3 is the one that costs design work. During an injection the frozen blocks lose exactly `L`
+clock edges and the shifted flops hold someone else's data, so a peripheral mid-transmission emits
+garbage. It needs a FIFO and a CDC into an ungated transmit domain, so the in-flight byte finishes
+while the core is frozen. The example SoC uses `scan_uart_top`; the reusable, bus-free half is
+`rtl/soc/perips/uart/cdc_rv_1deep.v`.
 
-These five do not cover everything. Nothing checks reset polarity, clock domains, or stateful
-black boxes. See [syn/README.md](syn/README.md).
+[docs/RUNBOOK.md](docs/RUNBOOK.md) §2.1 lists the remaining preconditions — reset polarity, the
+testmode port, hierarchy, JTAG IR width — which are checks to run against your design rather than
+things to build.
 
 ---
+
+## Repository layout
+
+| path | what |
+|---|---|
+| `rtl/fi/` | the wrapper: FI Transporter, FI Executor, the three controllers, the FI Table |
+| `syn/` | the synthesis flow: freeze gate, scan exclusion, the checks, the `FI_Index → flop` map |
+| `host/` | OpenOCD Tcl: DMI primitives, FI-entry encoder, ready-made campaigns |
+| `tb/` | testbench for the example SoC, with UART observation taps |
+| `tests/` | equivalence regression for the freeze gate, needs only `iverilog` |
+| `sim/` | Makefile for the gate-level campaign |
+| `firmware/` | the workload the campaign runs, prebuilt, with source |
+| `rtl/soc/` | the example DUT, vendored from tinyriscv. Keeps its original Chinese comments; the wrapper and its flow are in English. |
+| `docs/` | runbook and architecture description |
+
+## Documentation
+
+- **[docs/RUNBOOK.md](docs/RUNBOOK.md)** — clone to running campaign, step by step. **Start here.**
+- **[docs/DESIGN.md](docs/DESIGN.md)** — architecture, DMI register map, FI table encoding
+- **[syn/README.md](syn/README.md)** — the synthesis flow, and what the checks miss
 
 ## Taking it to an FPGA
 
@@ -228,33 +218,11 @@ module SDFQD1 (SI, D, SE, CP, Q);       // a scan flop is a 2:1 mux and a flop
 endmodule
 ```
 
-Two more substitutions:
+Memory macros go the same way: write them as plain Verilog arrays and synthesis infers block RAM.
 
-- each memory macro instance needs a block-RAM wrapper with the same ports
-- use `BUFGCE` for the freeze gate. Latch-plus-AND is not an FPGA clock primitive. The frozen
-  blocks must still lose exactly `L` edges; check any substitute with `tests/run.sh`.
-
----
-
-## Repository layout
-
-| path | what |
-|---|---|
-| `rtl/fi/` | the wrapper: FI Transporter, FI Executor, the three controllers, the FI Table |
-| `syn/` | the synthesis flow: freeze gate, scan exclusion, the invariants, the `FI_Index → flop` map |
-| `host/` | OpenOCD Tcl: DMI primitives, FI-entry encoder, ready-made campaigns |
-| `tb/` | testbench for the example SoC, with UART observation taps |
-| `tests/` | self-checking regression for the freeze gate, needs only `iverilog` |
-| `sim/` | Makefile for the gate-level campaign |
-| `firmware/` | the workload the campaign runs, prebuilt, with source |
-| `rtl/soc/` | the example DUT, vendored from tinyriscv. Keeps its original Chinese comments; the wrapper and its flow are in English. |
-| `docs/` | runbook and architecture description |
-
-## Documentation
-
-- **[docs/RUNBOOK.md](docs/RUNBOOK.md)** — clone to running campaign, step by step. **Start here.**
-- **[docs/DESIGN.md](docs/DESIGN.md)** — architecture, DMI register map, FI table encoding
-- **[syn/README.md](syn/README.md)** — the synthesis flow, and what the invariants miss
+If you replace the freeze gate itself, run `tests/run.sh` afterwards. It checks that a substitute
+still masks exactly `L` clock edges. One edge too many restores the chain perfectly and leaves
+every frozen block one cycle out of phase, which nothing else will tell you.
 
 ## Licence
 
