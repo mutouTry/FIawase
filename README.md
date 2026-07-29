@@ -209,6 +209,40 @@ be frozen instead. `u_pinmux` is in `FI_GATE_PINS` because shifting it scrambles
 
 ---
 
+## Taking it to an FPGA
+
+Import two things into Vivado as RTL:
+
+1. the scan-inserted netlist from `syn/results/`
+2. your standard cell library, rewritten as plain synthesisable Verilog
+
+The netlist is only cell instances, so Vivado maps it to LUTs and flops like any other
+RTL. The scan chain comes with it and `fi_scanmap.txt` stays valid.
+
+The rewrite is one small module per cell. Vendor simulation models use `specify` blocks,
+UDPs and timing checks that synthesis rejects; write the function instead:
+
+```verilog
+module AOI22D1 (A1, A2, B1, B2, ZN);
+    output ZN;  input A1, A2, B1, B2;
+    assign ZN = ~((A1 & A2) | (B1 & B2));
+endmodule
+
+module SDFQD1 (SI, D, SE, CP, Q);       // a scan flop is a 2:1 mux and a flop
+    output reg Q;  input SI, D, SE, CP;
+    always @(posedge CP) Q <= SE ? SI : D;
+endmodule
+```
+
+Two more substitutions:
+
+- each memory macro instance needs a block-RAM wrapper with the same ports
+- use `BUFGCE` for the freeze gate. Latch-plus-AND is not an FPGA clock primitive.
+  The frozen blocks must still lose exactly `L` edges; check any substitute with
+  `tests/run.sh`.
+
+---
+
 ## The five synthesis invariants
 
 Every flop must be either shifted (on the chain) or frozen (clock-gated). Anything else breaks

@@ -424,18 +424,17 @@ Parameters the wrapper side needs:
 
 ### Taking it to an FPGA
 
-The FPGA path loads the gate-level netlist, not the RTL, because the scan chain only
-exists in the netlist. So the cell models must be supplied:
+Import the scan-inserted netlist and a rewritten cell library into Vivado as RTL. See
+[README.md](../README.md#taking-it-to-an-fpga) for the two-cell example. The scan chain
+and `fi_scanmap.txt` carry over unchanged.
 
-- Rewrite the vendor's cell library (`stdlib.v`) as synthesisable RTL. PDK simulation
-  models use `specify` blocks, UDP primitives and timing constructs that FPGA synthesis
-  rejects. Write a behavioural equivalent of each cell the netlist instantiates: the
-  flops, the latch, and the combinational gates.
-- Replace each SRAM macro instance with a block-RAM wrapper carrying the same ports.
-- Latch-plus-AND is the wrong freeze primitive on an FPGA. Use the vendor's
-  clock-enable buffer (`BUFGCE` on Xilinx), or degrade the freeze to a clock enable on
-  the affected flops. The frozen blocks must still lose exactly `L` edges (§6.1). Check
-  any substitute with [tests/run.sh](../tests/run.sh).
+Beyond the cell library:
+
+- each memory macro instance needs a block-RAM wrapper with the same ports
+- use `BUFGCE` for the freeze gate, or degrade the freeze to a clock enable on the
+  affected flops. Latch-plus-AND is not an FPGA clock primitive. The frozen blocks must
+  still lose exactly `L` edges (§6.1); check any substitute with
+  [tests/run.sh](../tests/run.sh).
 
 ---
 
