@@ -88,8 +88,7 @@ set it **in this order**, because that is the order the flow dies in:
 | 5 | `FI_EXEMPT`, `FI_EXEMPT_CLOCKS` | A3 tells you exactly what to put here on the first run. Every entry needs a written reason |
 | 6 | `FI_N_FF` | power of two, `≥ L+1`; asserted by A4 |
 
-Avoid Tcl glob metacharacters is no longer necessary — prefixes are matched
-literally — but do use the instance path exactly as `report_scan_path` prints it.
+Use instance paths exactly as `report_scan_path` prints them.
 
 **Before any of this**, your DUT's RTL has to satisfy the contract in
 [README.md](../README.md#what-your-dut-has-to-provide) — in particular an
@@ -266,7 +265,7 @@ entries, and an index past the chain length warns because it would flip nothing.
 Use **`uart_txo.log`**. It taps `uart_tx[0]`, the DUT's own UART output. The pad
 (`stdout` and `uart_pad_fi.log`) additionally carries GPIO0 between reset and the
 firmware's pinmux setup, which fabricates bytes that no monitor reset can remove.
-See [DEBUG_NOTES.md](DEBUG_NOTES.md) A.3; keep the pad taps as a sanity check.
+Keep the pad taps as a sanity check.
 
 Check it took:
 
@@ -290,11 +289,11 @@ lags by one transaction, so the second value is the real one.
 | nothing is injected at all | `CFG_TBL_LEN` (DMI `0x68`) was not written. `0x0000_0000` is a legal table entry, so the end of the table is a **count**, not a sentinel. |
 | `FI_STATUS` bit 2 set (`err_order`) | a pattern's `FI_Index` values were not in descending order. Use `fi_pattern`, which sorts for you. |
 | injection lands on the wrong flop | `FI_Index` taken from an older netlist, or from the SCANDEF instead of `fi_scanmap.txt` |
-| telnet and OpenOCD both hang | a `runtest` count above ~8 in a host proc. Unexplained; see pitfall #7 in [DEBUG_NOTES.md](DEBUG_NOTES.md). |
-| garbled UART | see [DEBUG_NOTES.md](DEBUG_NOTES.md) A.3. Compare `uart_txo.log` against `uart_pad_fi.log` first: clean tx_o + dirty pad is the pad path, not the injection. |
+| telnet and OpenOCD both hang | a `runtest` count above ~8 in a host proc. 2 and 8 are known good, 80 and 100 kill the session. Unexplained. |
+| garbled UART | compare `uart_txo.log` against `uart_pad_fi.log` first: clean tx_o + dirty pad is the pad path, not the injection. |
 | extra bytes only in `uart_pad_fi.log` / stdout | the firmware drives GPIO0 on a pad shared with UART0_TX before it sets `io0_mux`. Expected; score `uart_txo.log`. The `[PAD-EDGE]` lines say exactly when. |
 | a monitor keyed on `fi_rst` behaves exactly like one keyed on `rst_ni` | it will, until a campaign is armed — `fi_rst = aon_rst_ni & ~resolver_rst_w` is combinational. A bare run proves nothing about it. |
 | `fi_campaign` refuses to load | it validates before writing anything, and the message says which limit. A gap over 262143 cycles or over 256 entries means splitting the campaign in two. |
 
-[docs/DEBUG_NOTES.md](DEBUG_NOTES.md) has the waveform probe points and a numbered
-list of every pitfall hit so far. Read it before debugging anything.
+[syn/README.md](../syn/README.md) lists what the five synthesis invariants do
+*not* cover — read it before trusting a netlist you just built.

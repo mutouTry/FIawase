@@ -23,7 +23,7 @@
 // every hit, so flipping at k1/k2/k3 within one pass gives exactly three
 // flipped FFs and a fully restored chain otherwise.
 //
-// Edge accounting (docs/DEBUG_NOTES.md A.2.2) is untouched:
+// Edge accounting is untouched:
 //   S      clk_gate<=1, testmode_o<=1, tm_lead<=1
 //   S+1    run<=1, run_cnt<=0, scan_en_o<=1        (scan_en trails gate by 1)
 //   S+2..  S+L+1  run_cnt 0->L-1, the L masked edges

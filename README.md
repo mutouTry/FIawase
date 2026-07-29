@@ -18,8 +18,7 @@ It was built around [tinyriscv](https://gitee.com/liangkangnan/tinyriscv), which
 ships here as a worked example, but the wrapper itself is DUT-independent.
 
 > **Status: usable, not polished.** It is verified in gate-level simulation on one
-> SoC and one PDK. Expect to iterate the first time you port it. See
-> [docs/TODO.md](docs/TODO.md) for the honest list of what is missing.
+> SoC and one PDK. Expect to iterate the first time you port it.
 
 ---
 
@@ -74,7 +73,7 @@ one rotation to model a multi-bit upset.
 | `sim/` | Makefile for the gate-level campaign (point `NETLIST=` at your own netlist) |
 | `firmware/` | the workload the campaign runs, with source |
 | `rtl/soc/` | the example DUT (tinyriscv SoC), vendored — see note below |
-| `docs/` | design, debugging notes, open issues, paper↔code alignment |
+| `docs/` | the runbook and the architecture description |
 
 ---
 
@@ -252,7 +251,7 @@ workload. `grep <flop-name> fi_scanmap.txt` finds the `FI_Index` for any flop.
 > differ in which flops reset clears, which is enough to change a marginal
 > outcome. `make SEED=2` re-runs the same faults from a different initial state,
 > and a trial whose class moves is one that depends on state the workload never
-> wrote. See [docs/TODO.md](docs/TODO.md#p3--simulation-and-observation).
+> wrote.
 
 > **The netlist, `rtl/fi/fi_scan_cfg.vh` and `host/tapename.tcl` must agree on
 > the chain length.** Synthesis emits the first two for you; `make -C syn
@@ -298,15 +297,11 @@ your first campaign, not after.
   running campaign, and what usually goes wrong. **Start here.**
 - **[docs/DESIGN.md](docs/DESIGN.md)** — architecture, the DMI register map, the
   clock-gate contract, the FI table encoding
-- **[docs/DEBUG_NOTES.md](docs/DEBUG_NOTES.md)** — module-by-module dissection, the
-  host protocol, waveform probe points, and a numbered list of every pitfall hit so
-  far. Read this before debugging anything.
-- **[docs/PAPER_ALIGNMENT.md](docs/PAPER_ALIGNMENT.md)** — how the module, signal
-  and register names map onto the FIawase paper, and the one place where the
-  paper's `FI_Entry` figure does not yet match the hardware
-- **[docs/TODO.md](docs/TODO.md)** — what is known to be missing or wrong
+- **[syn/README.md](syn/README.md)** — the two ways into the synthesis flow, and
+  what the five invariants do *not* cover
 
 ---
+
 
 ## Licence
 

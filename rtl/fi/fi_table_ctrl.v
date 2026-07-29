@@ -10,7 +10,8 @@
 // FI_Entry format (docs/DESIGN.md 5.5, paper Fig. 6). NOTE that this
 // differs from the encoding drawn in the paper -- the paper still shows
 // a Pattern_Len COUNT field; the hardware uses a 1-bit EOP marker
-// instead. docs/PAPER_ALIGNMENT.md is the reconciliation.
+// instead: an entry is the last of its trial iff bit 31 is set, which
+// costs one bit instead of a field and needs no length arithmetic.
 //
 //   bit  31 30                W_IDX W_IDX-1      0
 //       +---+--------------------+--------------+

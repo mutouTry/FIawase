@@ -17,7 +17,8 @@
 // plain falling edge on uart_rxd. So any 1->0 glitch on the pin produces
 // one bogus byte AND blocks the receiver for 10 bit times, swallowing or
 // misaligning whatever real byte starts inside that window. That is the
-// mechanism behind the garbled FI output; see docs/TODO.md T10/T10b.
+// mechanism behind the garbled FI output: the receiver must be reset from
+// the same reset as the DUT, or it stays desynchronised across trials.
 //
 // USE_FILE/LOGFILE let several instances tap different points in one
 // simulation without their output interleaving on stdout.

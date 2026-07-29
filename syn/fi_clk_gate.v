@@ -45,7 +45,8 @@
 // scan_en_sync in the netlist -- it just removes the two marginal
 // pulses that scan_en_sync produces at the window boundaries:
 //   * at S+1 scan_en_sync emits a RUNT (width = t_co of gate_q). It is
-//     the edge that must pass, and whether it does is a race. TODO T1.
+//     the edge that must pass, and whether it does is a race. Removing
+//     it is the reason this gate exists rather than scan_en_sync alone.
 //   * at S+L+2 scan_en_sync emits a LATE edge (delayed by the same
 //     t_co), eating into that cycle's setup margin.
 // Here both are full width.

@@ -315,8 +315,9 @@ proc fi_apply_scan_exclusion {} {
 # is free to reorder, and DC emits it in a different order than the
 # built chain. Using it silently produced a wrong FI_Index<->FF map. The
 # report's Cell_# column is the order that was actually built, and it
-# is the one calibrated against silicon^Wsimulation
-# (docs/DEBUG_NOTES.md A.2.2).
+# is the one calibrated against simulation. The SCANDEF is FLOATING and
+# does not agree with it -- see "Why FI_Index comes from report_scan_path"
+# in syn/README.md.
 # ============================================================
 proc fi__scan_order {} {
     global FI_RESULTS_DIR

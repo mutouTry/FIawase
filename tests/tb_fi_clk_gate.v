@@ -16,7 +16,7 @@
 //   2. they mask the SAME cycles (zero disagreement),
 //   3. the chain is restored bit-perfect with exactly one flip,
 //   4. fi_clk_gate emits no short pulse (the runt scan_en_sync has at
-//      the window boundary -- TODO T1).
+//      the window boundary).
 //
 // Run it again after touching fi_clk_gate.v, fi_scan_ctrl.v, or the
 // clk_gate/scan_en timing contract.

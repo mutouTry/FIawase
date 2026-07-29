@@ -57,11 +57,11 @@ set FI_GATE_PINS {
 }
 # uart0/clk_tx_i is deliberately NOT here. The in-flight byte has to
 # finish shifting out while the core is frozen, which is the whole
-# point of scan_uart_top's FIFO+CDC (docs/DEBUG_NOTES.md
-# A.3). That leaves uart0's tx-side flops neither gated nor on the
+# point of scan_uart_top's FIFO+CDC. That leaves uart0's tx-side flops
+# neither gated nor on the
 # chain, so uart0 also appears in FI_EXEMPT below.
 #
-# u_pinmux was added for TODO T2: with it on the chain, shifting
+# u_pinmux is here because with it on the chain, shifting
 # scrambles the pad mux and garbles the UART output. Freezing it holds
 # the pin selection steady across the whole scan window.
 

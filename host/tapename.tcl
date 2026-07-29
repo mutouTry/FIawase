@@ -60,8 +60,8 @@ proc fi_dmi_flush {} {
 #
 # NOTE on the idle count. This used to be "runtest 80", which sits
 # squarely in the range that hangs telnet + OpenOCD: 2 and 8 are known
-# good, 80 and 100 kill the session (TODO T7 -- the mechanism is still
-# unexplained, this value is empirical, not understood). That made
+# good, 80 and 100 kill the session. The mechanism is unexplained; this
+# value is empirical, not understood. That made
 # fi_dmi_read a trap that took the session down on the first status
 # read-back, which is what it looks like when "reads during FI do not
 # work".

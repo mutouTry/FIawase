@@ -71,8 +71,10 @@ flowchart TB
 
 Block-to-code mapping. **The block names are the paper's** (Fig. 4 and Fig. 5);
 the module and signal names follow them, so the paper can be read side by side
-with the RTL. See [PAPER_ALIGNMENT.md](PAPER_ALIGNMENT.md) for the one place
-where the paper and the hardware still disagree (the `FI_Entry` encoding).
+with the RTL. The one place where they diverge is the `FI_Entry` encoding: the
+paper still draws a `Pattern_Len` count field, and the hardware uses a 1-bit EOP
+marker instead — see the header of
+[fi_table_ctrl.v](../rtl/fi/fi_table_ctrl.v).
 
 
 | block | code | key signals |
@@ -314,8 +316,6 @@ bit  31 30                W_IDX W_IDX-1      0
 > The paper's Fig. 6 still shows the older three-field layout
 > `{Cycle_Offset(4b), Pattern_Len(12b), FI_Index(16b)}`. The hardware uses the
 > layout above: a 1-bit end-of-pattern marker in place of a `Pattern_Len` count.
-> [PAPER_ALIGNMENT.md](PAPER_ALIGNMENT.md) explains why and what the paper needs
-> to say instead.
 
 | field | valid when | meaning |
 |---|---|---|
@@ -504,8 +504,7 @@ reproducible.
 
 > **The trap**: setting `RTC_ALIGN_EN = 1` while `aon_lfclk_i` is tied to `1'b0`.
 > `rtc_rise_pulse` never fires, the window sticks in `rtc_phase = 1`, `resolver_rst`
-> is never raised, and the loop silently stops after the first trial. See pitfall #9
-> in [DEBUG_NOTES.md](DEBUG_NOTES.md).
+> is never raised, and the loop silently stops after the first trial.
 
 ---
 
