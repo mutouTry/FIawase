@@ -34,9 +34,8 @@ NETLIST        := /path/to/your/syn/results/tinyriscv_soc_top.mapped.v
 # UDP_MODELS      only if your library ships its user-defined primitives as
 #                 separate files rather than inline. Leave empty otherwise.
 # MEM_MODELS      the .v models of every macro the netlist instantiates.
-#                 Required whenever T22NM is defined (see DEFINES below):
-#                 the example SoC then instantiates sram_sp_16384x32 for the
-#                 ROM and sram_sp_8192x32 for the RAM.
+#                 The example SoC instantiates sram_sp_16384x32 (ROM) and
+#                 sram_sp_8192x32 (RAM).
 #
 # All three accept multiple entries and shell globs.
 STDCELL_MODELS := /path/to/your/pdk/verilog/your_stdcell_lib.v
@@ -46,18 +45,16 @@ MEM_MODELS     := /path/to/your/pdk/sram_verilog/sram_sp_16384x32.v \
 
 
 # ---- 3. compile-time defines --------------------------------------------
-# T22NM selects vendor SRAM macros over the gen_ram behavioural model, in
-# rtl/soc/perips/{rom,ram}.sv and in the testbench's ROM backdoor load.
+# Must be identical to FI_RTL_DEFINES in syn/tool_config.tcl. The netlist was
+# built with those defines; simulating with different ones does not match it.
 #
-#   with T22NM     the path this project's results were measured on. Needs
-#                  MEM_MODELS above, and the netlist must have been
-#                  synthesised with the same define.
-#   without T22NM  gen_ram instead. No macros needed, but 16k x 32 of
-#                  inferred flops -- fine for a first look, impractical to
-#                  synthesise, and not a path this project validates.
+# T22NM is the example SoC's own switch. It selects memory macros over
+# inferred RAM in rtl/soc/perips/{rom,ram}.sv and in the testbench's ROM
+# backdoor load. Your DUT will have its own defines, or none.
 #
-# If your ROM macro has a different instance path or a different internal
-# array name, override the backdoor target instead of patching the tb:
+# The testbench loads the ROM through a hierarchical reference. If your ROM
+# macro has a different path or array name, override it here instead of
+# editing the testbench:
 #   DEFINES += +define+FI_ROM_MEM=u_tinyriscv_soc_top.u_rom.uMYROM.mem
 DEFINES        := +define+T22NM
 

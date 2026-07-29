@@ -26,10 +26,9 @@
 # existing flow already sets these, copy the same values.
 #
 # LINK_LIBRARY must contain "*" (the in-memory designs) plus every .db the
-# design needs -- standard cells AND every macro the RTL instantiates. With
-# T22NM defined (see RTL_DEFINES below) that means the SRAM macro .db files
-# too, or elaboration will leave black boxes and the scan chain will be
-# built around holes.
+# design needs: standard cells, and every macro the RTL instantiates. A
+# missing macro .db leaves a black box, and the scan chain is then built
+# around a hole in the design.
 set FI_SEARCH_PATH   [list . /path/to/your/pdk/std_db /path/to/your/pdk/sram_db]
 set FI_TARGET_LIBRARY [list your_stdcell_<corner>.db]
 set FI_LINK_LIBRARY  [concat * $FI_TARGET_LIBRARY \
@@ -62,9 +61,8 @@ set FI_RTL_DIRS      [list ../rtl/soc/pkg \
 set FI_RTL_INCDIRS   [list ../rtl/soc/core ../rtl/soc/debug ../rtl/soc/pkg]
 
 # Reaches the RTL exactly as it reaches simulation -- see sim/config.mk.
-# T22NM selects the vendor SRAM macros over the gen_ram behavioural model.
-# Synthesising WITHOUT it infers 16k x 32 + 8k x 32 of flops, which is
-# technically valid and practically hopeless.
+# T22NM is the example SoC's own switch, selecting memory macros over
+# inferred RAM. Your DUT will have its own defines, or none.
 set FI_RTL_DEFINES   [list T22NM]
 
 set FI_SDC           ./constraints/fi_example.sdc

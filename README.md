@@ -89,9 +89,10 @@ paths only.
 
 - `sim/config.mk` also needs the behavioural `.v` models of your standard cells. Without them
   every module in the netlist is undefined.
-- Keep `T22NM` defined, in `DEFINES` / `FI_RTL_DEFINES`. It must match between synthesis and
-  simulation. Without it `rom.sv`/`ram.sv` instantiate `gen_ram` instead of memory macros, which
-  is far too large to synthesise.
+- If your DUT instantiates memory macros, supply their `.db` for synthesis and their `.v` model
+  for simulation.
+- The RTL defines must be the same on both sides. Synthesising with one set and simulating with
+  another gives a netlist the testbench cannot drive.
 - Both places take a full command, so tools behind a container or a site wrapper work.
 - `make -C sim echo-config` prints the configuration as resolved. Check it first when a build fails.
 
@@ -112,8 +113,8 @@ make -C syn dc DC_SHELL='singularity exec /path/to/syn.sif dc_shell'  # a make v
 cd tests && ./run.sh
 ```
 
-For chain lengths from 1 to 4143 it checks that the freeze window masks exactly `L` clock edges
-and that the chain comes back bit-perfect.
+Over nine chain lengths it checks that the freeze window masks exactly `L` clock edges and that
+the chain comes back bit-perfect.
 
 **2. Synthesise with scan and the freeze gate.** `syn/fi_scan_cfg.tcl` is the only DUT-specific file:
 
@@ -162,16 +163,16 @@ telnet localhost 4444            # in a third
 
 One trial is `{<cycle> {<FI_Index> ...}}`: when to inject, and which flops to flip. The three
 above are the same flop early, the same flop later, and a 3-bit upset at the same instant as the
-second. All of a trial's bits are flipped in one scan pass, so an n-bit upset costs `L` cycles,
+second. Those index numbers are for the example netlist; yours will differ. All of a trial's bits are flipped in one scan pass, so an n-bit upset costs `L` cycles,
 not `n*L`.
 
 Cycles are absolute, counted from reset release. The testbench prints the same ruler in
 `fi_exec_window.txt`. Use it to find the legal range for your workload. `grep <flop-name>
 fi_scanmap.txt` finds the `FI_Index` for any flop.
 
-> **A result belongs to one netlist and one seed.** Uninitialised flops are randomised, and this
-> DUT has 992 of them, so `sim/Makefile` pins the seed (`SEED ?= 1`). Re-baseline after
-> re-synthesising. `make SEED=2` re-runs the same faults from a different initial state.
+> **A result belongs to one netlist and one seed.** Flops with no reset start at a random value,
+> so `sim/Makefile` pins the seed (`SEED ?= 1`). Re-baseline after re-synthesising. `make SEED=2`
+> re-runs the same faults from a different initial state.
 
 > **The netlist, `rtl/fi/fi_scan_cfg.vh` and `host/tapename.tcl` must agree on the chain
 > length.** Synthesis emits the first two. `make -C syn sync-check` tells you whether all three

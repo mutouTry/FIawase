@@ -17,7 +17,7 @@ If you already have a Design Compiler flow, read
 | the same library's Verilog simulation model | stage 3 |
 | VCS | stage 3. The JTAG DPI bridge does not compile under iverilog. |
 | OpenOCD | stage 4 |
-| macro `.db` and a simulation model per memory the DUT instantiates | only if you synthesise with `T22NM` |
+| macro `.db` and a simulation model per memory the DUT instantiates | only if your DUT uses memory macros |
 
 The simulation memory model does not have to be the vendor's. Any module with
 the same pin list and behaviour works. See stage 3.
@@ -64,7 +64,8 @@ Fill in at minimum:
   macro `.db` leaves a black box and the scan chain is built around a hole.
 - `FI_BUF_CELL` / `FI_BUF_CELL_PIN`, `FI_IO_CELL` / `FI_IO_CELL_PIN` — any
   buffer and input cell. Only the example SDC uses them.
-- `FI_RTL_DEFINES` — keep `T22NM` if your memories are macros
+- `FI_RTL_DEFINES` — the defines your RTL needs. The example DUT uses `T22NM` to select memory
+  macros over inferred RAM.
 
 Then [syn/fi_scan_cfg.tcl](../syn/fi_scan_cfg.tcl), already correct for the
 bundled tinyriscv example. For your own DUT, set it in this order:
@@ -155,8 +156,7 @@ $EDITOR config.mk
   ```make
   DEFINES += +define+FI_ROM_MEM=u_tinyriscv_soc_top.u_rom.uMYROM.mem
   ```
-- `DEFINES` — must match what you synthesised with. `T22NM` on both sides or
-  neither.
+- `DEFINES` — must match what you synthesised with, exactly.
 - `UDP_MODELS` — only if your library ships its primitives separately
 - `SDF` — leave empty. Timing-annotated runs are much slower and are not needed.
 
@@ -195,8 +195,8 @@ telnet localhost 4444
 ```
 
 Run `poll off` first. Otherwise OpenOCD's background polling interleaves DMI
-transactions with yours. `fi_idcode` returns `1e200a6f` before the FI cutover
-and `f17e0006` after, which tells you which TAP owns TDO.
+transactions with yours. `fi_idcode` tells you which TAP owns TDO: your DUT's own
+IDCODE before the FI cutover, and `f17e0006` (the wrapper's) after.
 
 ### Trials
 
@@ -259,7 +259,7 @@ lags by one transaction, so the second value is the real one.
 | symptom | cause |
 |---|---|
 | `make` in `sim/` errors about `NETLIST` / `STDCELL_MODELS` | no `config.mk`, or it is incomplete |
-| thousands of undefined modules | `STDCELL_MODELS` wrong, or `MEM_MODELS` missing while `T22NM` is defined |
+| thousands of undefined modules | `STDCELL_MODELS` wrong, or `MEM_MODELS` missing while the netlist uses macros |
 | the DUT dies the moment FI is armed | the three files are out of sync. Run `make -C syn sync-check`. |
 | nothing is injected at all | `CFG_TBL_LEN` (DMI `0x68`) was not written. `0x0000_0000` is a legal table entry, so the end of the table is a count, not a sentinel. |
 | `FI_STATUS` bit 2 set (`err_order`) | a pattern's `FI_Index` values were not in descending order. Use `fi_pattern`, which sorts for you. |
