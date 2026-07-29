@@ -1,0 +1,110 @@
+# ==========================================================================
+# NEVER COMMIT FOUNDRY DATA.
+#
+# These patterns are a safety net, not a policy. The policy is that no PDK
+# material belongs in this repository at all: standard-cell libraries,
+# memory macros, gate-level netlists, and anything derived from them
+# (SDF, SPEF, .ddc) are covered by foundry NDAs. Once such a file lands in
+# a commit, deleting it later is not enough -- the history has to be
+# rewritten. Check `git status` before the first commit, every time.
+# ==========================================================================
+*.lib
+*.db
+*.lef
+*.gds
+*.gds2
+*.cdl
+*.sdf
+*.spef
+*.ddc
+*.svf
+*.scandef
+*.ctl
+*.spf
+T22lib/
+T22_Lib/
+**/std_lib/
+**/std_db/
+**/std_lef/
+**/sram_*/
+*.mapped.v
+*.mapped.*
+
+# ---- simulation and synthesis output --------------------------------------
+*.fsdb
+*.vcd
+*.vpd
+*.log
+*.rpt
+# sim/Makefile names the binary simv.<tool>[.sdf], so match the whole family.
+# This one matters more than the rest of this section: a gate-level simv is
+# compiled from the netlist and the cell models, i.e. it is foundry-derived.
+simv
+simv.*
+csrc/
+vc_hdrs.h
+fi_exec_window.txt
+inst_valid_log.txt
+ucli.key
+DVEfiles/
+verdiLog/
+novas.*
+*.vdb
+WORK/
+alib-*/
+work/
+results/
+reports/
+command.log
+filenames.log
+
+# ---- build products -------------------------------------------------------
+*.o
+*.a
+*.so
+*.elf
+*.bin
+*.hex
+*.verilog
+a.out
+
+# ...but the prebuilt workload image IS part of the repo: the BSP needed to
+# rebuild it is not vendored here, so without this exception a clone has no
+# runnable firmware at all. See firmware/README.md.
+!firmware/*.verilog
+
+# ---- local tool/PDK configuration -----------------------------------------
+# Every path in these points at a foundry deliverable or a local install.
+# Templates are checked in as *.example.
+syn/tool_config.tcl
+sim/config.mk
+# Everything else that is specific to one machine: the shell setup naming the
+# container images, and anything pulled out of the repo but worth keeping.
+# See local/README.md. Ignored wholesale, so nothing in it can be committed
+# by accident -- which also means nothing in it is ever backed up by git.
+local/
+# Older layout, kept so an existing clone does not suddenly stage it.
+local.env.sh
+syn/results/
+syn/reports/
+syn/WORK/
+syn/WORK_autoread/
+syn/alib-*/
+syn/*.log
+syn/*.ddc
+syn/check_design.rpt
+syn/default.svf
+syn/command.log
+syn/filenames.log
+
+# ---- editors and OS -------------------------------------------------------
+*.swp
+*.swo
+*~
+.DS_Store
+.vscode/
+.idea/
+
+# draft manuscript, kept locally for reference -- not published with the code
+FIawase.md
+FIawase__TCAD_*.pdf

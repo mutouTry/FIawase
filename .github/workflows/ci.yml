@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2025-2026 the FIawase authors
+#
+# The only thing in this repository that can run without a PDK and without a
+# commercial simulator -- and it happens to be the load-bearing invariant:
+# that the freeze gate masks EXACTLY the L clock edges the scan chain gains,
+# so the DUT can be restored bit-perfectly after an injection. Off by one in
+# either direction and every campaign is silently wrong.
+name: gate-equivalence
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  freeze-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          iverilog -V | head -1
+
+      - name: Elaborate the FI wrapper
+        run: iverilog -g2012 -o /dev/null -I rtl/fi -s fi_wrapper_top rtl/fi/*.v
+
+      - name: Freeze-gate equivalence regression
+        run: sh tests/run.sh

@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2025-2026 the FIawase authors
+# ==========================================================================
+# Copy this to sim/config.mk and fill in your own paths.
+#
+#     cp sim/config.mk.example sim/config.mk
+#     $EDITOR sim/config.mk
+#     make -C sim
+#
+# sim/config.mk is gitignored. Nothing in it belongs in a public repository:
+# every path below points at either a foundry deliverable or a build output.
+# ==========================================================================
+
+
+# ---- 1. the netlist ------------------------------------------------------
+# Gate-level netlist with the scan chain already inserted, i.e. the
+# ${RESULTS_DIR}/*.mapped.v that syn/scanchain.tcl wrote. REQUIRED.
+#
+# It must be the SAME netlist that produced the FI_SCAN_LEN currently in
+# rtl/fi/fi_scan_cfg.vh and host/tapename.tcl. If those disagree, the scan
+# chain is not restored after an injection and the DUT dies on the first
+# trial. syn/fi_scan_lib.tcl emits both files for exactly this reason --
+# copy them over after every synthesis run.
+NETLIST        := /path/to/your/syn/results/tinyriscv_soc_top.mapped.v
+
+
+# ---- 2. the library simulation models ------------------------------------
+# A gate-level netlist is nothing but instances of your standard cells, so
+# without their behavioural models every module in it is undefined. These
+# are foundry deliverables and are NOT in this repository.
+#
+# STDCELL_MODELS  the .v behavioural model(s) of your standard cell library.
+#                 One file for most libraries, e.g. tcbn*.v / sc*.v.
+# UDP_MODELS      only if your library ships its user-defined primitives as
+#                 separate files rather than inline. Leave empty otherwise.
+# MEM_MODELS      the .v models of every macro the netlist instantiates.
+#                 Required whenever T22NM is defined (see DEFINES below):
+#                 the example SoC then instantiates sram_sp_16384x32 for the
+#                 ROM and sram_sp_8192x32 for the RAM.
+#
+# All three accept multiple entries and shell globs.
+STDCELL_MODELS := /path/to/your/pdk/verilog/your_stdcell_lib.v
+UDP_MODELS     :=
+MEM_MODELS     := /path/to/your/pdk/sram_verilog/sram_sp_16384x32.v \
+                  /path/to/your/pdk/sram_verilog/sram_sp_8192x32.v
+
+
+# ---- 3. compile-time defines --------------------------------------------
+# T22NM selects vendor SRAM macros over the gen_ram behavioural model, in
+# rtl/soc/perips/{rom,ram}.sv and in the testbench's ROM backdoor load.
+#
+#   with T22NM     the path this project's results were measured on. Needs
+#                  MEM_MODELS above, and the netlist must have been
+#                  synthesised with the same define.
+#   without T22NM  gen_ram instead. No macros needed, but 16k x 32 of
+#                  inferred flops -- fine for a first look, impractical to
+#                  synthesise, and not a path this project validates.
+#
+# If your ROM macro has a different instance path or a different internal
+# array name, override the backdoor target instead of patching the tb:
+#   DEFINES += +define+FI_ROM_MEM=u_tinyriscv_soc_top.u_rom.uMYROM.mem
+DEFINES        := +define+T22NM
+
+
+# ---- 4. optional: SDF back-annotation ------------------------------------
+# Leave SDF empty for the fast functional run (this is the default, and what
+# the FI campaign normally uses). Set it to run with real cell delays.
+#
+# Setting SDF turns on +define+SDF_SIM, drops +nospecify/+notimingcheck, and
+# makes the testbench call $sdf_annotate. Note that SDF delays are in ps, so
+# the timescale precision moves to 1ps automatically -- at 10ps every
+# sub-nanosecond path would round to zero.
+SDF            :=
+SDF_INSTANCE   := chaos_soc_tb.u_tinyriscv_soc_top
+# MAXIMUM | TYPICAL | MINIMUM
+SDF_CORNER     := MAXIMUM
+
+
+# ---- 5. everything else --------------------------------------------------
+SIM_TOOL       := vcs
+
+# How to invoke the simulator. Leave as `vcs` when it is on PATH. Set the full
+# command when it lives behind a container or a site wrapper -- this is a
+# command prefix, not just a path, so anything that ends up exec'ing vcs works:
+#     VCS := singularity exec /path/to/vcs.sif vcs
+#     VCS := env MODULEPATH=... /usr/local/bin/vcs-wrapper
+VCS            := vcs
+FIRMWARE       := $(ROOT)/firmware/application_intmix.verilog
+DUMPWAVE       := 0
+
+# Seed for +vcs+initreg+random, which randomises every uninitialised flop --
+# and in the example SoC the GPRs have no reset, so this decides what the
+# workload reads before it writes. Pinned so a campaign is reproducible;
+# `make SEED=2` re-runs the same faults from a different initial state. A
+# trial whose outcome changes is one that depends on uninitialised state.
+SEED           := 1
+
+# Escape hatches for a DUT that needs more than the example SoC.
+EXTRA_SRC      :=
+EXTRA_INCDIRS  :=
+EXTRA_OPTS     :=

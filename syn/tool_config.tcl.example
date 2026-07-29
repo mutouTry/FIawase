@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2025-2026 the FIawase authors
+# ============================================================
+# tool_config.tcl -- your tools and your PDK.
+#
+#     cp tool_config.tcl.example tool_config.tcl
+#     $EDITOR tool_config.tcl
+#     make dc
+#
+# tool_config.tcl is gitignored. Every path in it points at a foundry
+# deliverable; none of it belongs in a public repository.
+#
+# This file is read by dc_fi.tcl, the standalone driver. If you already
+# have your own Design Compiler flow you do NOT need either of them --
+# see "Two ways in" in README.md and just source scanchain.tcl.
+#
+# One thing does NOT belong here, because dc_shell has to be running before
+# anything in this file is read: WHICH dc_shell. That is DC_SHELL in the
+# Makefile -- `make dc DC_SHELL='singularity exec /path/to/syn.sif dc_shell'`,
+# or an exported DC_SHELL in your shell profile.
+# ============================================================
+
+
+# ---- 1. libraries --------------------------------------------------------
+# Standard Verilog/DC variables. Nothing FIawase-specific here: if your
+# existing flow already sets these, copy the same values.
+#
+# LINK_LIBRARY must contain "*" (the in-memory designs) plus every .db the
+# design needs -- standard cells AND every macro the RTL instantiates. With
+# T22NM defined (see RTL_DEFINES below) that means the SRAM macro .db files
+# too, or elaboration will leave black boxes and the scan chain will be
+# built around holes.
+set FI_SEARCH_PATH   [list . /path/to/your/pdk/std_db /path/to/your/pdk/sram_db]
+set FI_TARGET_LIBRARY [list your_stdcell_<corner>.db]
+set FI_LINK_LIBRARY  [concat * $FI_TARGET_LIBRARY \
+                        [list sram_sp_16384x32_<corner>.db \
+                              sram_sp_8192x32_<corner>.db]]
+
+# Two library cells the example SDC references, for load and drive
+# modelling. Any reasonable buffer and input cell will do.
+set FI_BUF_CELL      your_stdcell_<corner>/BUFX4
+set FI_BUF_CELL_PIN  I                 ;# TSMC-style libs use I, Nangate/sky130 use A
+set FI_IO_CELL       your_io_lib/YOUR_INPUT_PAD
+set FI_IO_CELL_PIN   PAD
+
+
+# ---- 2. the design -------------------------------------------------------
+set FI_DESIGN_TOP    tinyriscv_soc_top
+
+# Directories handed to `analyze -autoread -recursive`. Order does not
+# matter; packages are resolved by autoread. rtl/fi is deliberately absent:
+# the FI wrapper sits OUTSIDE the DUT and is never synthesised into it.
+# rtl/soc/jtag_dpi is absent too -- it is a simulation-only DPI bridge.
+set FI_RTL_DIRS      [list ../rtl/soc/pkg \
+                           ../rtl/soc/core \
+                           ../rtl/soc/debug \
+                           ../rtl/soc/perips \
+                           ../rtl/soc/sys_bus \
+                           ../rtl/soc/utils \
+                           ../rtl/soc/top]
+
+set FI_RTL_INCDIRS   [list ../rtl/soc/core ../rtl/soc/debug ../rtl/soc/pkg]
+
+# Reaches the RTL exactly as it reaches simulation -- see sim/config.mk.
+# T22NM selects the vendor SRAM macros over the gen_ram behavioural model.
+# Synthesising WITHOUT it infers 16k x 32 + 8k x 32 of flops, which is
+# technically valid and practically hopeless.
+set FI_RTL_DEFINES   [list T22NM]
+
+set FI_SDC           ./constraints/fi_example.sdc
+
+
+# ---- 3. optional: start from an existing mapped design -------------------
+# Leave empty to synthesise from RTL.
+#
+# Set it to a mapped .ddc to reproduce the "make dc && make dc_open_net &&
+# source scanchain.tcl" shape of an existing flow: dc_fi.tcl then skips
+# analyze/elaborate/compile entirely and just reads this back, which is the
+# state scanchain.tcl expects (elaborated, linked, constrained, compiled
+# once). scanchain.tcl re-compiles it with -scan itself.
+set FI_INPUT_DDC     ""
+
+
+# ---- 4. where the output goes -------------------------------------------
+# Setting these here wins: fi_scan_cfg.tcl only defaults them, and
+# fi_init_flow_vars leaves an already-set value alone. Comment them out to
+# inherit your flow's RESULTS_DIR / REPORTS_DIR instead, or to fall back to
+# ./results and ./reports.
+set FI_RESULTS_DIR   ./results
+set FI_REPORTS_DIR   ./reports
