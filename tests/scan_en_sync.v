@@ -8,25 +8,20 @@ module scan_en_sync (
     output wire clk_gate_clk    // Gated clock output (high when scan_en is inactive)
 );
 
-    reg scan_en_q1, scan_en_q2;
+    reg scan_en_q1;
     wire scan_en_bus;     // Synchronized signal in clk domain
 
 
-    // 2-stage synchronizer to safely bring clk_gate into clk domain
+    // 1-stage synchronizer to bring clk_gate into clk domain
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             scan_en_q1 <= 1'b0;
-            // scan_en_q2 <= 1'b0;
         end else begin
             scan_en_q1 <= clk_gate;
-            // scan_en_q2 <= scan_en_q1;
         end
     end
 
     assign scan_en_bus    = scan_en_q1;
-    // always @(*) begin
-    //     if (~clk) scan_en_bus = scan_en_q1;
-    // end
 
 
 

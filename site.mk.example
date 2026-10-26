@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2025-2026 the FIawase authors
+# ==========================================================================
+# Your machine: the tools and the standard cell library. FIawase and a port
+# are the same on every machine; only this file is not.
+#
+#     cp site.mk.example site.mk     # site.mk is gitignored
+#
+# The synthesis flow and the simulation read it from here, or from
+# FI_SITE=/path/to/site.mk, so it can also live outside the repository.
+# ==========================================================================
+
+# ---- tools ----------------------------------------------------------------
+# Command prefixes, so a container or a site wrapper works too:
+#     DC_SHELL := singularity exec /path/to/syn.sif dc_shell
+DC_SHELL          := dc_shell
+VCS               := vcs
+OPENOCD           := openocd
+
+# ---- synthesis: the library .db files ---------------------------------------
+FI_SEARCH_PATH    := . /path/to/pdk/std_db /path/to/pdk/sram_db
+FI_TARGET_LIBRARY := your_stdcell_<corner>.db
+# Every macro the DUT instantiates; a missing one leaves a black box.
+FI_MACRO_LIBRARY  := sram_sp_16384x32_<corner>.db sram_sp_8192x32_<corner>.db
+# A buffer and an input cell, for the load and drive in the example SDC.
+FI_BUF_CELL       := your_stdcell_<corner>/BUFX4
+FI_BUF_CELL_PIN   := I
+FI_IO_CELL        := your_io_lib/YOUR_INPUT_PAD
+FI_IO_CELL_PIN    := PAD
+
+# ---- simulation: the same library's Verilog models ---------------------------
+STDCELL_MODELS    := /path/to/pdk/verilog/your_stdcell_lib.v
+UDP_MODELS        :=
+# The model of every macro the netlist instantiates; the example SoC uses
+# sram_sp_16384x32 (ROM) and sram_sp_8192x32 (RAM).
+MEM_MODELS        := /path/to/pdk/sram_verilog/sram_sp_16384x32.v \
+                     /path/to/pdk/sram_verilog/sram_sp_8192x32.v

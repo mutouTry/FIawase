@@ -15,7 +15,8 @@
 proc fi_mode_and_loader {} {
     fi_dmi_write 0x60 0x00000001
     echo "-> FI_MODE = 1"
-    sleep 100
+    # No wait is needed: the cutover happens on TCK edges, at the next safe TAP boundary
+    # (fi_transporter.v), and the next transactions below supply those edges.
 
     # 0x70 = TBL_CTRL, bit0 = AUTOINC
     fi_dmi_write 0x70 0x00000001
@@ -44,28 +45,19 @@ proc fi_config_and_arm {n {clk_fi 0x000073F0} {clk_to 0x00080000}} {
     fi_dmi_write 0x62 0x00000001   ;# CFG0: AUTO=1, END=0
     echo "-> CFG0"
 
-    # CFG_SCAN_LEN must equal the real scan chain length of the netlist that is
-    # compiled into the simulation, or the chain is not restored and the
-    # DUT dies on the first injection.
-    #
-    # FI_SCAN_LEN comes from tapename.tcl. Synthesis emits the matching
-    # value in syn/results/fi_scan_cfg.tcl (fi_export_scanmap);
-    # copy that file here, or paste the number into tapename.tcl, every
-    # time the netlist is regenerated. Runs differ: 4721 / 4727 / 5025
-    # have all been seen, and moving blocks off the chain moves it again.
-    #
-    # It does NOT affect the table encoding -- that is fixed by FI_W_IDX.
+    # CFG_SCAN_LEN is the chain length of the netlist being simulated:
+    # FI_SCAN_LEN from that netlist's fi_scan_cfg.tcl (tapename.tcl loads
+    # it). It does not affect the table encoding; FI_W_IDX fixes that.
     fi_dmi_write 0x63 $FI_SCAN_LEN ;# LEN
     echo "-> CFG_SCAN_LEN = $FI_SCAN_LEN"
 
-    fi_dmi_write 0x64 0x00000000   ;# WRCNT = 0 (static single-flip path off)
+    fi_dmi_write 0x64 0x00000000   ;# CFG_FI_INDEX = 0 (static single-flip path off)
     echo "-> CFG_FI_INDEX"
 
-    # CFG_TBL_LEN is how the hardware finds the end of the table. There is
-    # no end-of-table sentinel any more: 0x00000000 is a legal FI_Entry
-    # (EOP=0, Cycle_Offset=0, FI_Index=0). Its reset value is 0, so forgetting this
-    # write means nothing is ever injected -- deliberately a visible
-    # failure rather than a wrong one.
+    # CFG_TBL_LEN is how the hardware finds the end of the table: there is
+    # no sentinel, 0x00000000 is a legal FI_Entry (EOP=0, Cycle_Offset=0,
+    # FI_Index=0). Its reset value is 0, so forgetting this write means
+    # nothing is injected -- a visible failure rather than a wrong one.
     fi_dmi_write 0x68 $n
     echo "-> CFG_TBL_LEN = $n"
 
@@ -96,10 +88,10 @@ proc fi_config_and_arm {n {clk_fi 0x000073F0} {clk_to 0x00080000}} {
 # trial is ONE scan pass, so an n-bit upset costs L shifts, not n*L.
 #
 #   fi_campaign {
-#       {  30000 {2354} }               ;# SBU, early in the program
-#       {  90000 {2354} }               ;# the same flop, later
-#       {  90000 {2354 2355 2356} }     ;# MBU-3 at that same cycle
-#       { 150000 {17 600 4100} }        ;# MBU-3, scattered across the chain
+#       {  30000 {37} }                 ;# SBU, early in the program
+#       {  90000 {37} }                 ;# the same flop, later
+#       {  90000 {37 38 39} }           ;# MBU-3 at that same cycle
+#       { 150000 {17 600 2600} }        ;# MBU-3, scattered across the chain
 #   }
 #
 # What it derives, which is the whole reason it exists:
@@ -119,12 +111,12 @@ proc fi_config_and_arm {n {clk_fi 0x000073F0} {clk_to 0x00080000}} {
 # them in one trial.
 #
 # Limits, all checked before anything is written to the hardware:
-#   FI_Index      0 .. 2**FI_W_IDX-1, and > FI_SCAN_LEN never flips
+#   FI_Index      0 .. 2**FI_W_IDX-1, and >= FI_SCAN_LEN never flips
 #   Cycle_Offset  0 .. 2**(31-FI_W_IDX)-1 between consecutive trials
 #   entries       <= the FI Table depth (TBL_WORDS in fi_wrapper_top)
 #
 # to_thr is the length of EVERY trial and defaults to something that
-# clears both the last injection and this workload's UART tail. Pass it
+# clears both the last injection and the example workload's UART tail. Pass it
 # explicitly for a longer program.
 proc fi_campaign {trials {to_thr 0}} {
     global FI_W_IDX FI_SCAN_LEN
@@ -154,8 +146,8 @@ proc fi_campaign {trials {to_thr 0}} {
         }
         set cyc [lindex $t 0]
         set idx [lsort -integer -decreasing -unique [lindex $t 1]]
-        if {![string is integer -strict $cyc] || $cyc < 0} {
-            error "fi_campaign: cycle must be a non-negative integer, got '$cyc'"
+        if {![string is integer -strict $cyc] || $cyc <= 0} {
+            error "fi_campaign: FI_Cycle must be a positive integer (0 disables injection), got '$cyc'"
         }
         if {[llength $idx] == 0} {
             error "fi_campaign: the trial at cycle $cyc flips nothing"
@@ -164,7 +156,7 @@ proc fi_campaign {trials {to_thr 0}} {
             if {![string is integer -strict $p] || $p < 0 || $p > $max_idx} {
                 error "fi_campaign: FI_Index '$p' outside 0..$max_idx (FI_W_IDX = $FI_W_IDX)"
             }
-            if {$p > $FI_SCAN_LEN} {
+            if {$p >= $FI_SCAN_LEN} {
                 echo "fi_campaign: WARNING FI_Index $p is past the end of the chain ($FI_SCAN_LEN); that entry flips nothing"
             }
         }
@@ -220,7 +212,7 @@ proc fi_campaign {trials {to_thr 0}} {
 }
 
 # One multi-bit upset at one cycle: the single-shot form of fi_campaign.
-#   fi_mbu 90000 {2354 2355 2356}
+#   fi_mbu 90000 {37 38 39}
 proc fi_mbu {cycle indexlist} {
     fi_campaign [list [list $cycle $indexlist]]
 }

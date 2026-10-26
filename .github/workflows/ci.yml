@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2025-2026 the FIawase authors
 #
-# The only thing in this repository that can run without a PDK and without a
-# commercial simulator -- and it happens to be the load-bearing invariant:
-# that the freeze gate masks EXACTLY the L clock edges the scan chain gains,
-# so the DUT can be restored bit-perfectly after an injection. Off by one in
-# either direction and every campaign is silently wrong.
+# What runs without a PDK and without a commercial simulator: the wrapper
+# elaborates, and the regressions of tests/ and fpga/tests/ pass. tests/ holds
+# the load-bearing invariant: the freeze gate masks exactly the L clock edges
+# the scan chain gains, so the DUT is restored after an injection.
 name: gate-equivalence
 
 on:
@@ -27,7 +26,10 @@ jobs:
           iverilog -V | head -1
 
       - name: Elaborate the FI wrapper
-        run: iverilog -g2012 -o /dev/null -I rtl/fi -s fi_wrapper_top rtl/fi/*.v
+        run: iverilog -g2012 -o /dev/null -I tests -I rtl -s fi_wrapper_top rtl/*.v
 
-      - name: Freeze-gate equivalence regression
+      - name: Wrapper regressions
         run: sh tests/run.sh
+
+      - name: FPGA host UART
+        run: sh fpga/tests/run.sh

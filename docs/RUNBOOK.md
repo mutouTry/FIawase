@@ -1,205 +1,100 @@
-# Runbook — from a clone to a running FI campaign
+# Runbook: the example SoC
 
-Ordered steps. Everything foundry-owned comes from two config files you write;
-none of it ships with the repository.
+This page takes [examples/tinyriscv](../examples/tinyriscv/) from a fresh clone to a
+running campaign. For your own SoC, see [PORTING.md](PORTING.md). Commands run from
+the top of the repository unless a step says otherwise.
 
-If you already have a Design Compiler flow, read
-[syn/README.md](../syn/README.md) first and skip most of stage 2.
+## What you need
 
----
-
-## What you need in hand
-
-| item | used for |
+| | for |
 |---|---|
-| Design Compiler | scan insertion. Stage 2 only. |
-| standard cell library, `.db` | synthesis |
-| the same library's Verilog simulation model | stage 3 |
-| VCS | stage 3. The JTAG DPI bridge does not compile under iverilog. |
-| OpenOCD | stage 4 |
-| macro `.db` and a simulation model per memory the DUT instantiates | only if your DUT uses memory macros |
+| Design Compiler, a standard cell library (`.db`), the `.db` of the example's two SRAM macros | synthesis |
+| VCS, the Verilog models of the same library, a simulation model of each SRAM | simulation |
+| OpenOCD | the campaign |
 
-The simulation memory model does not have to be the vendor's. Any module with
-the same pin list and behaviour works. See stage 3.
+The SRAM models do not have to come from the vendor. A module with the same pins and
+the same behaviour also works.
 
 ---
 
-## Stage 0 — check the invariant
+## 0. Your machine
 
 ```sh
-cd tests && ./run.sh
+cp site.mk.example site.mk
+$EDITOR site.mk
 ```
 
-Expect `ALL PASS` over nine chain lengths. If this fails, stop.
+`site.mk` describes your machine. Git ignores it. To keep it outside the repository,
+set `FI_SITE=/path/to/site.mk`.
+
+- `DC_SHELL`, `VCS`, `OPENOCD`: the command for each tool. A container or a site
+  wrapper can be part of the command.
+- `FI_SEARCH_PATH`: the directories with your `.db` files
+- `FI_TARGET_LIBRARY`: the standard cell `.db` at the corner you want
+- `FI_MACRO_LIBRARY`: the `.db` of each macro. If one is missing, that macro becomes
+  a black box.
+- `FI_BUF_CELL` / `FI_BUF_CELL_PIN`, `FI_IO_CELL` / `FI_IO_CELL_PIN`: a buffer and an
+  input cell, used by the example SDC
+- `STDCELL_MODELS`, `MEM_MODELS`: the Verilog models of the same library and macros.
+  The testbench writes the program into the ROM through a hierarchical reference to
+  a 32-bit reg array called `ram`. If your model names it differently, set
+  `DEFINES := +define+T22NM +define+FI_ROM_MEM=<path>`.
 
 ---
 
-## Stage 1 — decide whether to synthesise
-
-Skip stage 2 if you already have a scan-inserted netlist of this DUT. Point
-`sim/config.mk` at it and go to stage 3. The netlist must satisfy the contract
-in [syn/README.md](../syn/README.md): one scan chain, the freeze gate present,
-the frozen blocks off the chain. A netlist from an earlier `scanchain.tcl` run
-qualifies.
-
-Do stage 2 if you have no netlist, or if you changed `FI_GATE_PINS`.
-
----
-
-## Stage 2 — synthesis
-
-### 2.1 Configure
+## 1. Synthesise
 
 ```sh
-cd syn
-cp tool_config.tcl.example tool_config.tcl
-$EDITOR tool_config.tcl
+make -C syn/flow dc
 ```
 
-Fill in at minimum:
+A successful run ends with `FI-PASS`. Otherwise `make` stops with an error. To try a
+change without compiling the RTL again, add `INPUT_DDC=` with the
+`<top>.compiled.ddc` of an earlier run.
 
-- `FI_SEARCH_PATH` — directories holding your `.db` files
-- `FI_TARGET_LIBRARY` — standard cell `.db` at the corner you want
-- `FI_LINK_LIBRARY` — `*`, the standard cells, and every macro `.db`. A missing
-  macro `.db` leaves a black box and the scan chain is built around a hole.
-- `FI_BUF_CELL` / `FI_BUF_CELL_PIN`, `FI_IO_CELL` / `FI_IO_CELL_PIN` — any
-  buffer and input cell. Only the example SDC uses them.
-- `FI_RTL_DEFINES` — the defines your RTL needs. The example DUT uses `T22NM` to select memory
-  macros over inferred RAM.
+The results are in `syn/flow/results/`:
 
-Then [syn/fi_scan_cfg.tcl](../syn/fi_scan_cfg.tcl), already correct for the
-bundled tinyriscv example. For your own DUT, set it in this order:
-
-| | what | if it is wrong |
-|---|---|---|
-| 1 | `FI_CLK_PORT`, `FI_RST_PORT` | `FI-ERROR: port '...' not found on <top>` |
-| 2 | `FI_GATE_PORT` | your DUT's name for the freeze input. If absent the flow creates it and warns, and you must drive it a level up. |
-| 3 | `FI_TESTMODE_PORT` | must already exist on your DUT. The flow creates `io_scanin/en/out` but not this one. A missing port is a Tcl error mid-run, and `dc_shell` does not stop on those. |
-| 4 | `FI_GATE_PINS` | clock pins, not instances. Each must already be driven by `FI_CLK_PORT`. The flow reconnects whatever it finds without checking. |
-| 5 | `FI_EXEMPT`, `FI_EXEMPT_CLOCKS` | A3 lists what to put here on the first run |
-| 6 | `FI_N_FF` | power of two, `>= L+1`. Asserted by A4. |
-
-Use instance paths exactly as `report_scan_path` prints them.
-
-#### Preconditions to check against your design
-
-Three of these come from [README.md](../README.md#what-your-dut-has-to-provide):
-the freeze input, one free-running functional clock, and an observation channel
-that survives a freeze. The rest are properties the flow assumes and does not
-verify.
-
-| what | why | if your design differs |
-|---|---|---|
-| the reset on `FI_RST_PORT` is **active low** | hardcoded in `fi_clk_gate.v`, `fi_scan_lib.tcl`, `scanchain.tcl` and `fi_wrapper_top.v` | edit those four places. Nothing warns you. |
-| a **testmode input already exists** | declared with `-view existing_dft`; only the three scan ports are created for you | add the port to your top level |
-| **hierarchy survives both compiles** | `-no_autoungroup`. Flattening destroys the `FI_Index → flop` map and the instance paths the checks match on | keep `-no_autoungroup` |
-| exactly **one clock domain needs freezing** | one gate is built on one net | a second domain cannot be expressed |
-| every stateful **black-box macro** sits under a frozen instance | `all_registers` does not return black boxes, so A3 cannot see them | freeze the parent, or prove the macro is idle |
-| the JTAG TAP has a **5-bit IR** | both TAPs share one IR shift under a single OpenOCD `-irlen` | edit `FI_JTAG_IR_BITS` in `rtl/fi/fi_transporter.v` |
-| **TRSTn**, if your TAP has one | the wrapper does not pass it through | wire it outside the wrapper |
-
-### 2.2 Run
-
-```sh
-make dc
-```
-
-To reuse an existing mapped `.ddc`, set `FI_INPUT_DDC` in `tool_config.tcl`.
-`make dc` then skips analyze/elaborate/compile and reads it back.
-
-### 2.3 Read the verdict
-
-The last thing printed is a PASS/FAIL banner. `make dc` exits non-zero if
-`FI-PASS` is absent.
-
-A first run on a new DUT normally fails assertion A3 with a list of registers
-that are neither shifted, nor frozen, nor exempt. Each entry belongs in
-`FI_GATE_PINS`, `FI_EXEMPT` or `FI_EXEMPT_CLOCKS`. Fix them and re-run.
-
-`dc_shell`'s `source` does not stop on a Tcl error, so a failed run still writes
-a netlist. **If `fi_scan_cfg.vh` and `fi_scan_cfg.tcl` are missing from
-`results/`, the checks did not pass. Do not use the netlist.**
-
-### 2.4 What you get
-
-In `results/`:
-
-| file | goes where |
+| file | |
 |---|---|
-| `<top>.mapped.v` | `NETLIST` in `sim/config.mk` |
-| `fi_scan_cfg.vh` | copy over `rtl/fi/fi_scan_cfg.vh` |
-| `fi_scan_cfg.tcl` | its two values go into `host/tapename.tcl` |
-| `fi_scanmap.txt` | `FI_Index -> flop`. Grep it to pick targets. |
-| `fi_scan_path.rpt` | the raw report the map was parsed from |
+| `tinyriscv_soc_top.mapped.v` | the netlist |
+| `fi_scan_cfg.vh`, `fi_scan_cfg.tcl` | chain length, scrub length and index width, read by the simulation and the host |
+| `fi_scanmap.txt` | which flop each `FI_Index` is. Search it to pick targets. |
+| `fi_scan_path.rpt` | the Design Compiler report the map comes from |
+| `fi_clock_gates.txt` | the clock gates on the registers' clock paths, for an FPGA build |
 
-### 2.5 Sync the three files
-
-```sh
-cp results/fi_scan_cfg.vh ../rtl/fi/fi_scan_cfg.vh
-$EDITOR ../host/tapename.tcl        # FI_SCAN_LEN and FI_W_IDX, from results/fi_scan_cfg.tcl
-make sync-check
-```
-
-`sync-check` prints the chain length found in all three places and fails if they
-disagree. A `CFG_SCAN_LEN` that does not match the netlist means the chain is
-never restored and the DUT dies on the first injection, with no error message.
-
-Re-synthesis moves `L` and every `FI_Index`. Targets picked from an older
-netlist are invalid.
+`fi_scan_cfg.vh` and `fi_scan_cfg.tcl` are written only when the checks pass. A new
+synthesis run can change the chain length and the position of each flop, so pick
+targets from the current `fi_scanmap.txt`.
 
 ---
 
-## Stage 3 — gate-level simulation
-
-### 3.1 Configure
+## 2. Simulate
 
 ```sh
-cd sim
-cp config.mk.example config.mk
-$EDITOR config.mk
+cd examples/tinyriscv/sim
+make echo-config     # shows the settings it found
+make                 # builds and runs
 ```
 
-- `NETLIST` — from stage 2, or your existing one
-- `STDCELL_MODELS` — your library's behavioural `.v`. Required.
-- `MEM_MODELS` — a simulation model for each macro in the netlist. A plain
-  behavioural module with the same port list is enough. The testbench
-  back-door-loads the ROM through a hierarchical reference, so the model must
-  hold its array in a 32-bit-wide reg. If it is not called `ram`, override the
-  path:
-  ```make
-  DEFINES += +define+FI_ROM_MEM=u_tinyriscv_soc_top.u_rom.uMYROM.mem
-  ```
-- `DEFINES` — must match what you synthesised with, exactly.
-- `UDP_MODELS` — only if your library ships its primitives separately
-- `SDF` — leave empty. Timing-annotated runs are much slower and are not needed.
+By default the simulation uses the netlist in `syn/flow/results/`, and
+`make NETLIST=<file>` uses another one. `make wave` also writes a waveform, and
+`make run` runs again without rebuilding. Campaigns normally run without timing,
+but `make SDF=<file>` adds it.
 
-```sh
-make echo-config     # check what it resolved before building
-```
-
-### 3.2 Run
-
-```sh
-make            # build and run
-make wave       # same, dumping a waveform
-make run        # re-run without rebuilding
-```
-
-The simulator opens the `remote_bitbang` TCP server and waits. Expect
-`jtag0: Accepted client connection` once OpenOCD attaches. Leave it running.
+The simulator then waits for OpenOCD and prints `jtag0: Accepted client connection`
+when it connects. Leave it running.
 
 ---
 
-## Stage 4 — drive the campaign
+## 3. Run a campaign
 
-In a second shell:
+In a second shell, in `examples/tinyriscv/sim`:
 
 ```sh
-openocd -f host/fi_openocd.cfg
+make openocd
 ```
 
-`fi_openocd.cfg` creates the TAP, brings the target up, and sources the FI
-procs. In a third shell:
+In a third shell:
 
 ```sh
 telnet localhost 4444
@@ -207,81 +102,81 @@ telnet localhost 4444
 > fi_idcode
 ```
 
-Run `poll off` first. Otherwise OpenOCD's background polling interleaves DMI
-transactions with yours. `fi_idcode` tells you which TAP owns TDO: your DUT's own
-IDCODE before the FI cutover, and `f17e0006` (the wrapper's) after.
+Run `poll off` first. Otherwise OpenOCD keeps polling in the background, and its
+DMI accesses get mixed with yours. `fi_idcode` shows which TAP answers. Before the
+wrapper takes over, it is the DUT's own TAP. After that, it is the wrapper's,
+`f17e0007`.
 
 ### Trials
 
-`fi_campaign` is the only entry point. One trial is
-`{<FI_Cycle> {<FI_Index> ...}}`: an absolute injection cycle and the set of
-flops to flip in it. Pick indices with
-`grep <flop-name> syn/results/fi_scanmap.txt`.
+A trial is `{<FI_Cycle> {<FI_Index> ...}}`, the cycle to inject at and the flops to
+flip. To find the index of a flop, search for its name in
+`syn/flow/results/fi_scanmap.txt`.
 
 ```
-> fi_campaign { {30000 {2354}} {90000 {2354}} {90000 {2354 2355 2356}} {150000 {17 600 4100}} }
-> fi_mbu 90000 {2354 2355 2356}
+> fi_campaign { {30000 {37}} {90000 {37}} {90000 {37 38 39}} {150000 {17 600 2600}} }
+> fi_mbu 90000 {37 38 39}
 ```
 
-`fi_mbu` is the single-shot form of one trial. Pass a second argument to
-`fi_campaign` to set `CFG_TO_THR` yourself for a longer workload.
+`fi_mbu` runs a single trial. For a longer workload, give `fi_campaign` a second
+argument, the timeout `CFG_TO_THR`. Write a campaign on one line. Tcl does not treat
+`;#` inside `{ ... }` as a comment, so a comment between trials makes the campaign
+invalid.
 
-Keep the campaign on one line. Tcl does no comment processing inside `{ ... }`,
-so a `;#` note between trials becomes a list element and `fi_campaign` rejects
-the campaign with `got ';#'`. Annotate around the command, not inside the
-braces.
+The bits of one trial are flipped in the same scan pass, so a multi-bit upset takes
+`L` shifts, like a single one. Two trials with the same cycle are still two
+separate trials, each with its own reset and run.
 
-One trial is one scan pass. An n-bit upset costs `L` shifts, not n·`L`. Bits in
-the same trial flip together. Two trials at the same cycle stay two trials, with
-separate resets and separate program runs.
+Cycles are counted from the release of reset, the same way as in
+`fi_exec_window.txt`. Choose them from the `[exec start, exec end)` range that the
+testbench writes there.
 
-Cycles are absolute, counted from reset release, on the same scale as
-`fi_exec_window.txt`. Draw them from the `[exec start, exec end)` range printed
-in stage 3.
+When you start a campaign, the program that is already running continues until its
+cycle counter reaches `CFG_TO_THR`. The campaign's trials come after it. OpenOCD
+halts the DUT when it starts (`FI_DUT_TARGET 1`, the default), so this first run
+prints nothing and the testbench reports it as a timeout.
 
-Limits are checked before the first DMI write:
+`fi_campaign` checks these limits before it writes anything:
 
 | limit | value |
 |---|---|
-| `Cycle_Offset` | 18 bits, max gap 262143 cycles between consecutive trials |
+| `Cycle_Offset` | 18 bits, so at most 262143 cycles between two trials |
 | `FI_Index` | 13 bits |
 | FI Table | 256 entries |
-| index past chain length | warns; it would flip nothing |
 
-### Which log to score
+### Reading the results
 
-Use `uart_txo.log`. It taps `uart_tx[0]`, the DUT's own UART output. The pad
-(`stdout` and `uart_pad_fi.log`) also carries GPIO0 between reset and the
-firmware's pinmux setup, which fabricates bytes. Keep the pad taps as a sanity
-check.
+Use `uart_txo.log`. It records `uart_tx[0]`, the output of the UART itself. The pad
+(`stdout`, `uart_pad_fi.log`) also carries GPIO0 until the firmware switches the pin
+mux, which adds some bytes before the real output.
 
-### Check the campaign took
+The testbench prints one `[FI-TRIAL n]` line for each trial. It says whether the
+program printed its output, finished without printing, or timed out. Classifying a
+trial as Masked, SDC or DUE is left to the host, by comparing its output with that of
+a run without faults.
 
-```
-> fi_status_dump
-```
+`fi_status_dump` reads `FI_VERSION`, `CFG_SCAN_LEN`, `CFG_TBL_LEN`, `CFG_FI_CYCLE`,
+the current `FI_CYCLE` and `FI_STATUS`. Each register is read twice, because the
+answer comes one access late. The second value is the right one.
 
-Reads back `FI_VERSION`, `CFG_SCAN_LEN`, `CFG_TBL_LEN`, `CFG_FI_CYCLE`, the
-running `FI_CYCLE` and `FI_STATUS`. Each register is read twice: the response
-lags by one transaction, so the second value is the real one.
+Results depend on the netlist and on the simulation seed. Flops without a reset
+start at a random value, and `SEED` (1 by default) fixes that value. After a new
+synthesis run, the results can differ.
 
 ---
 
-## Where it usually goes wrong
+## When something goes wrong
 
-| symptom | cause |
+| what you see | likely cause |
 |---|---|
-| `make` in `sim/` errors about `NETLIST` / `STDCELL_MODELS` | no `config.mk`, or it is incomplete |
-| thousands of undefined modules | `STDCELL_MODELS` wrong, or `MEM_MODELS` missing while the netlist uses macros |
-| the DUT dies the moment FI is armed | the three files are out of sync. Run `make -C syn sync-check`. |
-| nothing is injected at all | `CFG_TBL_LEN` (DMI `0x68`) was not written. `0x0000_0000` is a legal table entry, so the end of the table is a count, not a sentinel. |
-| `FI_STATUS` bit 2 set (`err_order`) | a pattern's `FI_Index` values were not in descending order. Use `fi_pattern`, which sorts for you. |
-| injection lands on the wrong flop | `FI_Index` taken from an older netlist, or from the SCANDEF instead of `fi_scanmap.txt` |
-| telnet and OpenOCD both hang | a `runtest` count above ~8 in a host proc. 2 and 8 are known good; 80 and 100 kill the session. Unexplained. |
-| garbled UART | compare `uart_txo.log` against `uart_pad_fi.log` first. Clean tx_o with dirty pad is the pad path, not the injection. |
-| extra bytes only in `uart_pad_fi.log` / stdout | the firmware drives GPIO0 on a pad shared with UART0_TX before it sets `io0_mux`. Expected; score `uart_txo.log`. The `[PAD-EDGE]` lines say when. |
-| a monitor keyed on `fi_rst` behaves like one keyed on `rst_ni` | it will, until a campaign is armed. `fi_rst = aon_rst_ni & ~resolver_rst_w` is combinational. |
-| `fi_campaign` refuses to load | the message says which limit. A gap over 262143 cycles or over 256 entries means splitting the campaign in two. |
-
-[syn/README.md](../syn/README.md) lists what the five synthesis invariants do
-not cover.
+| `make` stops at `STDCELL_MODELS` | `site.mk` is missing or incomplete |
+| `fi_scan_cfg.vh not found` | synthesis did not pass its checks, or the netlist was moved away from its results |
+| thousands of undefined modules | `STDCELL_MODELS` is wrong, or `MEM_MODELS` is missing while the netlist uses macros |
+| nothing is injected | `CFG_TBL_LEN` (DMI `0x68`) was not written. The table has no end marker, only this length. |
+| the loop stops after the first trial | `RTC_ALIGN_EN = 1` while `aon_lfclk_i` is tied to 0 ([DESIGN §7](DESIGN.md#7-pacing-the-reset-window-and-the-duts-slow-clock)) |
+| `FI_STATUS` bit 2 (`err_order`) | the `FI_Index` values of a trial were not in descending order. `fi_pattern` sorts them. |
+| `FI_STATUS` bit 3 (`err_malformed`) | the last entry of the table has `EOP = 0`. `fi_pattern` ends each trial with one. |
+| `FI_STATUS` bit 5, and the campaign stopped | the DUT wrote to a memory while it was being restored. Something reaches that memory while the DUT should be frozen or in reset. |
+| `FI_STATUS` bit 6 | the trial changed a memory more often than its undo log can hold, and was ended. Count it as DUE. If a run without faults sets it too, that memory needs FILL or a larger log. |
+| the injection hits the wrong flop | the `FI_Index` came from an older netlist, or from the SCANDEF instead of `fi_scanmap.txt` |
+| telnet and OpenOCD both hang | a host procedure uses a `runtest` count much larger than 8 |

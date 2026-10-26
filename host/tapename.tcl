@@ -58,18 +58,9 @@ proc fi_dmi_flush {} {
 # scan (NOP) captures the result.
 # Returns {status data addr}; status 0 = OK, 2 = FAIL, 3 = BUSY.
 #
-# NOTE on the idle count. This used to be "runtest 80", which sits
-# squarely in the range that hangs telnet + OpenOCD: 2 and 8 are known
-# good, 80 and 100 kill the session. The mechanism is unexplained; this
-# value is empirical, not understood. That made
-# fi_dmi_read a trap that took the session down on the first status
-# read-back, which is what it looks like when "reads during FI do not
-# work".
-#
-# Idling less is harmless here: the response lags by one transaction
-# regardless (A.1.6), which is exactly why the documented usage is to
-# read the same address twice and keep the second result.
-# fi_status_dump already does that.
+# The idle count is 8: with telnet + OpenOCD a much larger count hangs the
+# session. The response lags one transaction anyway: read an address twice
+# and keep the second result, as fi_status_dump does.
 proc fi_dmi_read {addr} {
     global TAPNAME
     fi_ir_dmi
@@ -94,31 +85,24 @@ proc fi_dmi_read {addr} {
 #   Cycle_Offset ONLY read from the EOP entry: non-negative increment
 #                added to FI_Cycle after this pattern's trial finishes.
 #                Entries of patterns that stay on the same cycle put 0.
-#   FI_Index     tail-relative scan position. The hardware flips at
-#                shift step L-1-FI_Index, so FI_Index 0 = no flip.
+#   FI_Index     scan position, 0 = first cell after Scan_In. The hardware
+#                flips at shift step L-1-FI_Index; FI_Index >= L = no flip.
 #
 # One pattern = ONE scan pass that flips all of its bits, so all of a
 # pattern's entries are consumed inside a single L-cycle shift loop.
 #
-# FI_W_IDX must match the RTL's $clog2(N_FF)
-# (rtl/fi/fi_scan_cfg.vh: FI_N_FF = 8192 -> 13). It is a power
-# of two on purpose, so re-synthesis moving L around does not move the
-# field boundaries. Read DMI 0x6F (FI_VERSION) to confirm the wrapper
-# speaks this format: 0x00020000 = EOP/Cycle_Offset, 0x00010000 = the
-# older {N[31:24], FI_Index[23:0]}.
+# FI_W_IDX is the RTL's $clog2(FI_N_FF). FI_N_FF is a power of two on
+# purpose, so re-synthesis moving L around does not move the field
+# boundaries. Read DMI 0x6F (FI_VERSION) to confirm the wrapper speaks
+# this format: 0x00030000 = EOP/Cycle_Offset, FI_Index 0 = first cell.
 #
-# FI_SCAN_LEN is the measured chain length of the netlist in the sim
-# tree; fi_config_and_arm writes it to CFG_SCAN_LEN (DMI 0x63). Unlike
-# FI_W_IDX it changes on every re-synthesis, and getting it wrong means
-# the chain is not restored -- the DUT dies on the first injection.
+# FI_SCAN_LEN is the measured chain length; fi_config_and_arm writes it to
+# CFG_SCAN_LEN (DMI 0x63).
 #
-# Both values are emitted by synthesis into
-#   syn/results/fi_scan_cfg.tcl
-# (fi_scan_lib.tcl / fi_export_scanmap). Copy that file over these two
-# lines after every `make dc` + scanchain.tcl run. The flop names behind
-# each FI_Index are in results/fi_scanmap.txt.
-set FI_W_IDX    13
-set FI_SCAN_LEN 4143
+# Both belong to one netlist. Synthesis writes them to fi_scan_cfg.tcl
+# next to it, and fi_openocd.cfg names that file FI_CFG. The flop behind
+# each FI_Index is in fi_scanmap.txt in the same directory.
+if {[info exists FI_CFG]} { source $FI_CFG }
 
 proc fi_entry {eop off fi_index} {
     global FI_W_IDX
@@ -151,8 +135,8 @@ proc fi_pattern {off indexlist} {
 
 # Read the IDCODE of whichever TAP currently owns TDO. This is the most
 # reliable way to tell whether the FI cutover has happened:
-#   before cutover = 1e200a6f  (the DUT's own TAP)
-#   after  cutover = f17e0006  (the FI wrapper TAP)
+#   before cutover = 1e200a6f  (the example DUT's own TAP)
+#   after  cutover = f17e0007  (the FI wrapper TAP)
 proc fi_idcode {} {
     global TAPNAME
     irscan $TAPNAME 0x01
